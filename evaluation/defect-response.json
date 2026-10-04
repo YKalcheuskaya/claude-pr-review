@@ -1,0 +1,15 @@
+{
+  "status": "complete",
+  "summary": "The candidate allows one extra attempt after the budget is exhausted.",
+  "findings": [{
+    "severity": "high",
+    "file": "src/prreview/demo.py",
+    "side": "RIGHT",
+    "start": 1,
+    "end": 1,
+    "description": "An exhausted attempt budget still permits another request.",
+    "evidence": "With completed=3 and maximum=3, <= evaluates to true.",
+    "recommendation": "Use completed < maximum."
+  }],
+  "limitations": []
+}

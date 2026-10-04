@@ -1,0 +1,115 @@
+name: Claude PR review
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions: {}
+
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+env:
+  PYTHONPATH: src
+  CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL || 'claude-haiku-4-5-20251001' }}
+  PYTHONDONTWRITEBYTECODE: '1'
+
+jobs:
+  analyze:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !github.event.pull_request.draft &&
+      github.event.pull_request.user.type != 'Bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check out trusted base scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Fetch PR commit as data only
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          HEADER=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)
+          echo "::add-mask::$HEADER"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $HEADER" fetch --no-tags origin "$HEAD_SHA"
+      - name: Install pinned SDK from trusted base manifest
+        run: python -m pip install -r requirements-lock.txt
+      - name: Prepare exact input
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -m prreview.cli prepare --event "$GITHUB_EVENT_PATH" --output outputs/input.json
+      - name: Analyze or reuse existing review
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python -m prreview.cli analyze --input outputs/input.json --output outputs/result.json
+      - name: Transfer validated result
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: claude-review-${{ github.run_id }}-${{ github.run_attempt }}
+          path: outputs/*.json
+          if-no-files-found: error
+          retention-days: 7
+
+  gate:
+    name: Claude review gate
+    needs: analyze
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Explain excluded PR
+        if: needs.analyze.result == 'skipped'
+        run: |
+          echo 'Skipped: draft, fork or bot PR; no Claude call. This is outside v1 coverage.'
+      - name: Fail when analysis did not complete
+        if: needs.analyze.result != 'success' && needs.analyze.result != 'skipped'
+        run: |
+          echo 'Analysis failed or was cancelled; review is incomplete.'
+          exit 1
+      - name: Check out trusted publisher
+        if: needs.analyze.result == 'success'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - if: needs.analyze.result == 'success'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Fetch PR commit as data only
+        if: needs.analyze.result == 'success'
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          HEADER=$(printf 'x-access-token:%s' "$GITHUB_TOKEN" | base64 -w0)
+          echo "::add-mask::$HEADER"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $HEADER" fetch --no-tags origin "$HEAD_SHA"
+      - if: needs.analyze.result == 'success'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: claude-review-${{ github.run_id }}-${{ github.run_attempt }}
+          path: outputs
+      - name: Revalidate, publish inline review and enforce severity
+        if: needs.analyze.result == 'success'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python -m prreview.cli publish --event "$GITHUB_EVENT_PATH" --input outputs/input.json --result outputs/result.json
