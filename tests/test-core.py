@@ -3,9 +3,9 @@ import json
 from pathlib import Path
 import unittest
 
-from prreview.core import (MAX_BYTES, ReviewError, cached_result, gate,
+from pr_review.core import (MAX_BYTES, ReviewError, cached_result, gate,
                            locations, payload, validate_content, validate_input)
-from prreview.service import analyze
+from pr_review.service import analyze
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -81,7 +81,7 @@ class Contracts(unittest.TestCase):
         variants = ["x" * (MAX_BYTES + 1), "\x00", self.data["diff"].replace("100644", "100755"),
                     self.data["diff"].replace("+return", "GIT binary patch\n+return"),
                     self.data["diff"].replace("@@ -1 +1 @@", "@@ -1,4 +1 @@"),
-                    self.data["diff"].replace("src/prreview/demo.py", "../escape.py")]
+                    self.data["diff"].replace("src/pr_review/demo.py", "../escape.py")]
         variants.append("".join(self.data["diff"].replace("demo.py", f"file-{n}.py") for n in range(21)))
         for diff in variants:
             with self.subTest(diff=diff[:60]), self.assertRaises(ReviewError):

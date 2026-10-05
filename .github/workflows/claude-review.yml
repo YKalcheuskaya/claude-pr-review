@@ -50,12 +50,12 @@ jobs:
       - name: Prepare exact input
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python -m prreview.cli prepare --event "$GITHUB_EVENT_PATH" --output outputs/input.json
+        run: python -m pr_review.cli prepare --event "$GITHUB_EVENT_PATH" --output outputs/input.json
       - name: Analyze or reuse existing review
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: python -m prreview.cli analyze --input outputs/input.json --output outputs/result.json
+        run: python -m pr_review.cli analyze --input outputs/input.json --output outputs/result.json
       - name: Transfer validated result
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -112,4 +112,4 @@ jobs:
         if: needs.analyze.result == 'success'
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python -m prreview.cli publish --event "$GITHUB_EVENT_PATH" --input outputs/input.json --result outputs/result.json
+        run: python -m pr_review.cli publish --event "$GITHUB_EVENT_PATH" --input outputs/input.json --result outputs/result.json

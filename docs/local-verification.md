@@ -32,6 +32,8 @@ model resistance to prompt injection remains unverified.
 GitHub workflow execution, actual inline-comment acceptance, merge-blocking rule
 enforcement, Haiku accuracy/cost, Sonnet comparison and Julia's independent
 explanation are **Unknown**. Python 3.12 execution is specified in CI but has not
-yet been observed. The project has no remote and stores no credential.
+yet been observed. Initial checks were local with no remote; Julia authorized
+private publication on October 4. The project stores no credential. GitHub CI
+results must be observed separately after pushing.
 
 Review [the delivery package](github-delivery.md) for the remaining experiment.

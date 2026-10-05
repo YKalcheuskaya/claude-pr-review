@@ -3,9 +3,10 @@
 A focused GitHub Actions integration: open a pull request or push a new commit,
 receive Claude findings on diff lines, and block merge for high/critical findings.
 
-**Status — October 3, 2026:** implemented and tested locally. No remote, live Claude
-run, GitHub review or branch-protection verification has been performed for this
-project. Authored replay responses demonstrate software behavior, not model quality.
+**Status — October 4, 2026:** implemented and tested locally; Julia authorized
+publication to a private GitHub repository. Live Claude calls, GitHub PR reviews
+and branch-protection enforcement have not been demonstrated for this project.
+Authored replay responses demonstrate software behavior, not model quality.
 The implementation was developed with AI assistance; Julia's independent explanation
 is a separate evidence gate.
 
@@ -21,6 +22,9 @@ flowchart LR
 ```
 
 ## Run locally
+
+The Python package is `pr_review`; the executable and project name remain
+`claude-pr-review`.
 
 Python 3.10+ on macOS/Linux. The live CLI uses a POSIX wall-clock timer and runs
 in the main thread; GitHub uses Ubuntu and Python 3.12.
@@ -38,10 +42,10 @@ uses the locked environment with no skips.
 Replay a known defect and generate the exact publication payload:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m prreview.cli analyze \
+PYTHONPATH=src .venv/bin/python -m pr_review.cli analyze \
   --input evaluation/input.json --recorded evaluation/defect-response.json \
   --output outputs/defect-result.json
-PYTHONPATH=src .venv/bin/python -m prreview.cli publish \
+PYTHONPATH=src .venv/bin/python -m pr_review.cli publish \
   --input evaluation/input.json --result outputs/defect-result.json \
   --dry-run --output outputs/defect-payload.json
 ```
@@ -59,8 +63,9 @@ stale snapshot, missing configuration or publication failure.
 
 ## GitHub setup
 
-Follow [the concrete delivery package](docs/github-delivery.md) after external
-authorization. Publish the complete source to `main` first so both review jobs
+Follow [the delivery package](docs/github-delivery.md) for the authorized private
+publication and the separately proposed live experiment. Publish the complete
+source to `main` first so both review jobs
 can check out the scripts from the trusted base commit.
 
 1. Set repository secret `ANTHROPIC_API_KEY` through GitHub Settings. Never put the

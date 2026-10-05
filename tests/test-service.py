@@ -7,9 +7,9 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from prreview.core import ReviewError, payload
-from prreview.demo import should_retry
-from prreview.service import analyze, eligible, prepare, publish, schema, SYSTEM
+from pr_review.core import ReviewError, payload
+from pr_review.demo import should_retry
+from pr_review.service import analyze, eligible, prepare, publish, schema, SYSTEM
 
 ROOT = Path(__file__).resolve().parents[1]
 

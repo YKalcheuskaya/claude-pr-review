@@ -1,27 +1,36 @@
 # GitHub delivery and bounded live demonstration
 
-Prepared October 3, 2026. This is a concrete proposal, not external authorization.
+Updated October 4, 2026. Julia authorized private repository creation and source
+publication after a readiness check. Paid calls, secrets, demo PRs, merge rules
+and any public visibility change remain separate decisions.
 
-## Proposed package for Julia's approval
+## Authorized initial publication
+
+Create private `YKalcheuskaya/claude-pr-review`, configure its HTTPS remote, publish
+the reviewed `main` source including the approved `pr_review` package rename, and
+observe the credential-free Verify workflow. Do not overwrite an existing repository.
+No Claude API secret is configured in this step; a push to `main` cannot trigger
+the PR-only model workflow. Never configure a remote for the parent career repository.
+
+## Separately proposed live experiment
 
 | Item | Proposed value |
 | --- | --- |
 | Repository | `YKalcheuskaya/claude-pr-review` (existence not checked) |
-| Visibility | Public, containing only this project's reviewed source |
+| Visibility | Private; any public release needs separate approval |
 | Remote | `https://github.com/YKalcheuskaya/claude-pr-review.git` |
-| Source | The local verified initial checkpoint; record exact SHA at approval |
+| Source | Current published `main`; pin its exact SHA before the experiment |
 | Authentication | Julia's existing GitHub session; runtime uses `GITHUB_TOKEN` |
 | Secret | Julia supplies `ANTHROPIC_API_KEY` directly in GitHub Settings |
 | Initial model | `claude-haiku-4-5-20251001`, subject to availability check |
 | Model budget | Three new calls maximum, $2 ceiling, auto-reload off |
-| Actions | Create repository, initial push, add secret/variable, enable Actions reviews, protect `main`, create two demo PRs and push one correction |
+| Actions | Add secret/variable, enable Actions reviews, protect `main` if available, create two demo PRs and push one correction |
 | Merge | Manual; no merge authorized by this package |
 | Sonnet | Separate later experiment after Haiku flow evidence is reviewed |
 
-Public visibility supports eventual portfolio inspection and avoids assuming a
-paid GitHub plan for private branch protection. Repository creation and visibility
-are not yet approved. If the name exists, inspect it and stop rather than overwrite.
-Never configure a remote for the parent career repository.
+The repository stays private. Availability of private branch protection is not
+verified for this account; check it before claiming enforced merge blocking.
+Private publication alone does not demonstrate the live reviewer or authorize billing.
 
 ## Live steps after authorization
 

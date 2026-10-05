@@ -6,9 +6,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from prreview.cli import main
-from prreview.core import ReviewError, cached_result, payload
-from prreview.service import analyze
+from pr_review.cli import main
+from pr_review.core import ReviewError, cached_result, payload
+from pr_review.service import analyze
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -42,7 +42,7 @@ class CliScenarios(unittest.TestCase):
             event_path.write_text(json.dumps({"repository": {"full_name": data["repository"]},
                 "number": 2, "pull_request": {"base": {"sha": data["base"]}, "head": {"sha": data["head"]}}}))
             result_path.write_text(json.dumps(result))
-            with patch("prreview.cli.api") as api, contextlib.redirect_stderr(io.StringIO()) as stderr:
+            with patch("pr_review.cli.api") as api, contextlib.redirect_stderr(io.StringIO()) as stderr:
                 exit_code = main(["publish", "--input", str(ROOT / "evaluation/input.json"),
                     "--result", str(result_path), "--event", str(event_path)])
             self.assertEqual(exit_code, 2)
@@ -70,6 +70,6 @@ class CliScenarios(unittest.TestCase):
             event_path, output = Path(directory) / "event.json", Path(directory) / "input.json"
             event_path.write_text(json.dumps({"repository": {"full_name": data["repository"]},
                 "number": 1, "pull_request": {"base": {"sha": data["base"]}, "head": {"sha": "c" * 40}}}))
-            with patch("prreview.cli.api"), patch("prreview.cli.prepare", return_value=data), contextlib.redirect_stderr(io.StringIO()):
+            with patch("pr_review.cli.api"), patch("pr_review.cli.prepare", return_value=data), contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(main(["prepare", "--event", str(event_path), "--output", str(output)]), 2)
             self.assertFalse(output.exists())

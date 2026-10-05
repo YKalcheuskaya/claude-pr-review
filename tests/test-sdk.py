@@ -4,8 +4,8 @@ import json
 from pathlib import Path
 import unittest
 
-from prreview.core import ReviewError
-from prreview.service import analyze
+from pr_review.core import ReviewError
+from pr_review.service import analyze
 
 ROOT = Path(__file__).resolve().parents[1]
 

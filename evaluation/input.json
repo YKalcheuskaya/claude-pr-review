@@ -7,5 +7,5 @@
   "merge_base": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "model": "claude-haiku-4-5-20251001",
   "config": "v1-files20-bytes61440-tokens4000-seconds60",
-  "diff": "diff --git a/src/prreview/demo.py b/src/prreview/demo.py\nindex 1111111..2222222 100644\n--- a/src/prreview/demo.py\n+++ b/src/prreview/demo.py\n@@ -1 +1 @@\n-return completed < maximum\n+return completed <= maximum\n"
+  "diff": "diff --git a/src/pr_review/demo.py b/src/pr_review/demo.py\nindex 1111111..2222222 100644\n--- a/src/pr_review/demo.py\n+++ b/src/pr_review/demo.py\n@@ -1 +1 @@\n-return completed < maximum\n+return completed <= maximum\n"
 }

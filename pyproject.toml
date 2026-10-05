@@ -10,8 +10,9 @@ requires-python = ">=3.10"
 dependencies = ["anthropic==1.11.0"]
 
 [project.scripts]
-claude-pr-review = "prreview.cli:main"
+claude-pr-review = "pr_review.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 namespaces = true
+include = ["pr_review*"]

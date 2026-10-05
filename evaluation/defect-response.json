@@ -3,7 +3,7 @@
   "summary": "The candidate allows one extra attempt after the budget is exhausted.",
   "findings": [{
     "severity": "high",
-    "file": "src/prreview/demo.py",
+    "file": "src/pr_review/demo.py",
     "side": "RIGHT",
     "start": 1,
     "end": 1,
