@@ -1,8 +1,10 @@
 # GitHub delivery and bounded live demonstration
 
-Updated October 4, 2026. Julia authorized private repository creation and source
-publication after a readiness check. Paid calls, secrets, demo PRs, merge rules
-and any public visibility change remain separate decisions.
+Updated October 5, 2026. Julia authorized private repository creation and source
+publication, then paid cheapest-model calls and full GitHub flow verification.
+She added the API secret directly in GitHub and confirmed readiness. The bounded
+experiment is recorded in [live verification](live-verification-2026-10-05.md).
+Public visibility, automatic merge and a Sonnet comparison are not authorized.
 
 ## Authorized initial publication
 
@@ -12,7 +14,7 @@ observe the credential-free Verify workflow. Do not overwrite an existing reposi
 No Claude API secret is configured in this step; a push to `main` cannot trigger
 the PR-only model workflow. Never configure a remote for the parent career repository.
 
-## Separately proposed live experiment
+## Authorized bounded live experiment
 
 | Item | Proposed value |
 | --- | --- |
@@ -24,13 +26,15 @@ the PR-only model workflow. Never configure a remote for the parent career repos
 | Secret | Julia supplies `ANTHROPIC_API_KEY` directly in GitHub Settings |
 | Initial model | `claude-haiku-4-5-20251001`, subject to availability check |
 | Model budget | Three new calls maximum, $2 ceiling, auto-reload off |
-| Actions | Add secret/variable, enable Actions reviews, protect `main` if available, create two demo PRs and push one correction |
+| Actions | Add secret/variable, use scoped COMMENT-review permission, protect `main` if available, create two demo PRs and push one correction |
 | Merge | Manual; no merge authorized by this package |
 | Sonnet | Separate later experiment after Haiku flow evidence is reviewed |
 
-The repository stays private. Availability of private branch protection is not
-verified for this account; check it before claiming enforced merge blocking.
-Private publication alone does not demonstrate the live reviewer or authorize billing.
+The repository stays private. The branch-protection API returned HTTP 403 requiring
+GitHub Pro or public visibility. Do not make it public or purchase a subscription
+without Julia's direction. Enforced merge blocking remains unverified and unavailable
+on the current plan. The publisher submitted COMMENT reviews without enabling
+automatic PR approval.
 
 ## Live steps after authorization
 

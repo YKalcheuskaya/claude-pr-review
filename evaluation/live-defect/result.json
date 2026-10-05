@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "identity": "7d20004a3d3142076648d3c4eb2e139d938206f312024416e831d45848c0cab6",
+  "model": "claude-haiku-4-5-20251001",
+  "duration_ms": 4831,
+  "content": {
+    "status": "complete",
+    "summary": "The diff modifies the should_retry function's docstring and logic. A critical defect was identified in the retry condition that contradicts the documented behavior and the function's own validation.",
+    "findings": [
+      {
+        "severity": "critical",
+        "file": "src/pr_review/demo.py",
+        "side": "RIGHT",
+        "start": 12,
+        "end": 12,
+        "description": "Logic error: condition changed from 'completed < maximum' to 'completed <= maximum', which violates the documented constraint that the function should 'never exceed maximum attempts'. When completed equals maximum, a retry is allowed, meaning the total attempts would be maximum + 1, exceeding the stated limit.",
+        "evidence": "Line 12: 'return (status == 429 or 500 <= status <= 599) and completed <= maximum'. The docstring states 'never exceed maximum attempts' and completed 'includes the failed request', so if completed == maximum and retry returns True, a new attempt would exceed the maximum.",
+        "recommendation": "Change the condition back to 'completed < maximum' to ensure that when all maximum attempts have been completed (including the failed one), no further retry is allowed. This maintains consistency with the docstring and validates the maximum parameter's purpose."
+      }
+    ],
+    "limitations": []
+  },
+  "usage": {
+    "input_tokens": 973,
+    "output_tokens": 273
+  },
+  "live": true
+}

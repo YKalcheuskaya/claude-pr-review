@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "repository": "YKalcheuskaya/claude-pr-review",
+  "pr": 2,
+  "base": "ed1c74574ebef290a7dcd44bc114656215aeff50",
+  "head": "fca00118132608bc8ff8baf9225e732d50a0a6c0",
+  "merge_base": "ed1c74574ebef290a7dcd44bc114656215aeff50",
+  "diff": "diff --git a/src/pr_review/demo.py b/src/pr_review/demo.py\nindex 7fcdc5d..032ea20 100644\n--- a/src/pr_review/demo.py\n+++ b/src/pr_review/demo.py\n@@ -2,9 +2,12 @@\n \n \n def should_retry(status: int, completed: int, maximum: int) -> bool:\n-    \"\"\"Completed includes the failed request; never exceed maximum attempts.\"\"\"\n+    \"\"\"Completed includes the failed request; never exceed maximum attempts.\n+\n+    Retry only rate limits and server errors while an attempt remains.\n+    \"\"\"\n     if any(type(value) is not int for value in (status, completed, maximum)):\n         raise ValueError(\"integer inputs required\")\n     if not 100 <= status <= 599 or completed < 1 or maximum < 1:\n         raise ValueError(\"invalid status or attempt count\")\n-    return (status == 429 or 500 <= status <= 599) and completed < maximum\n+    return (status == 429 or 500 <= status <= 599) and completed <= maximum\n",
+  "model": "claude-haiku-4-5-20251001",
+  "config": "v1-files20-bytes61440-tokens4000-seconds60"
+}

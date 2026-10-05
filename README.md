@@ -1,13 +1,18 @@
 # Claude PR Review
 
 A focused GitHub Actions integration: open a pull request or push a new commit,
-receive Claude findings on diff lines, and block merge for high/critical findings.
+receive Claude findings on diff lines, and fail a check for high/critical findings.
+Blocking merge additionally requires a configured GitHub branch-protection rule.
 
-**Status — October 4, 2026:** published to the private
+**Status — October 5, 2026:** published to the private
 [GitHub repository](https://github.com/YKalcheuskaya/claude-pr-review). The
 [first Verify run](https://github.com/YKalcheuskaya/claude-pr-review/actions/runs/37246943855)
-passed on Python 3.10 and 3.12. Live Claude calls, GitHub PR reviews
-and branch-protection enforcement have not been demonstrated for this project.
+passed on Python 3.10 and 3.12. Live Haiku reviews now demonstrate a clean PR,
+a real inline finding on the seeded retry defect and a failed severity gate.
+The clean rerun reused the same result without adding another review.
+See [the live experiment](docs/live-verification-2026-10-05.md) for the complete
+observed results and limitations. Branch-protection enforcement is unavailable
+on the current private-repository plan; a failed check does not yet prohibit merging.
 Authored replay responses demonstrate software behavior, not model quality.
 The implementation was developed with AI assistance; Julia's independent explanation
 is a separate evidence gate.
@@ -66,7 +71,7 @@ stale snapshot, missing configuration or publication failure.
 ## GitHub setup
 
 Follow [the delivery package](docs/github-delivery.md) for the authorized private
-publication and the separately proposed live experiment. Publish the complete
+publication and the bounded live experiment. Publish the complete
 source to `main` first so both review jobs
 can check out the scripts from the trusted base commit.
 
@@ -76,9 +81,10 @@ can check out the scripts from the trusted base commit.
 2. Set repository variable `CLAUDE_MODEL` to an explicitly verified, available
    model ID. The initial candidate is `claude-haiku-4-5-20251001`; no fallback is
    allowed. Confirm availability immediately before the authorized demonstration.
-3. Enable Actions and “Allow GitHub Actions to create and approve pull requests”
-   where needed for review submission. Job permissions remain limited to those
-   in the workflow; no code-writing job exists.
+3. Enable Actions. Scoped `pull-requests: write` in the publisher is sufficient
+   for the demonstrated `COMMENT` review. The repository's “Allow GitHub Actions
+   to create and approve pull requests” setting stayed disabled; this project
+   does not require automatic approval. No code-writing job exists.
 4. After the checks have run, create an active rule for `main` requiring pull
    requests, **Claude review gate**, and the two Verify test checks. Require the
    branch to be up to date. Remove bypass actors for the demonstration and test
@@ -126,9 +132,11 @@ receive a model call. Push without a PR runs ordinary verification only.
 ## Evidence and explanation
 
 See [local verification](docs/local-verification.md), [delivery and live scenarios](docs/github-delivery.md),
-and [the walkthrough](docs/walkthrough.md). Live PR/run URLs and measured accuracy
-remain **Unknown** until the authorized experiment is complete. The earlier AI
-Pipeline's results are not evidence of this project's live behavior.
+and [the walkthrough](docs/walkthrough.md). Actual PR/run URLs and retained
+responses are in [the live verification report](docs/live-verification-2026-10-05.md).
+These few controlled cases do not establish general review accuracy; the model
+overstated the seeded defect's severity. The earlier AI Pipeline's results are
+not evidence of this project's live behavior.
 
 ## Technical sources
 

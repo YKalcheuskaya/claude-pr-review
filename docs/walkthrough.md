@@ -33,6 +33,9 @@ with recorded responses separately from measuring the model's review quality.”
 - How can a false positive block a PR? How would you investigate it?
 - What did the live experiment actually establish, and what remains unverified?
 
-Independent explanation and live model quality are not yet demonstrated. Do not
+Independent explanation is not yet demonstrated. The private live experiment
+verified clean/defect/fix reviews and cached rerun behavior, but model quality
+evidence is limited to those cases and severity was over-calibrated. The current
+private GitHub plan does not enforce merge blocking. Do not
 claim production use, independent implementation, hostile-code containment or
 general review accuracy from the local tests.
