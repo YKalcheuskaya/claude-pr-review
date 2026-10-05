@@ -10,4 +10,4 @@ def should_retry(status: int, completed: int, maximum: int) -> bool:
         raise ValueError("integer inputs required")
     if not 100 <= status <= 599 or completed < 1 or maximum < 1:
         raise ValueError("invalid status or attempt count")
-    return (status == 429 or 500 <= status <= 599) and completed <= maximum
+    return (status == 429 or 500 <= status <= 599) and completed < maximum
