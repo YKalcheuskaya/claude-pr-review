@@ -16,7 +16,7 @@ the PR-only model workflow. Never configure a remote for the parent career repos
 
 | Item | Proposed value |
 | --- | --- |
-| Repository | `YKalcheuskaya/claude-pr-review` (existence not checked) |
+| Repository | `YKalcheuskaya/claude-pr-review`, created privately October 4 |
 | Visibility | Private; any public release needs separate approval |
 | Remote | `https://github.com/YKalcheuskaya/claude-pr-review.git` |
 | Source | Current published `main`; pin its exact SHA before the experiment |

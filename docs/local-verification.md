@@ -1,4 +1,4 @@
-# Local verification — 2026-10-03
+# Release verification — updated 2026-10-04
 
 ## Verified
 
@@ -29,11 +29,17 @@ are authored fixtures. Their findings establish pipeline behavior only. The syst
 prompt's treatment of repository instructions is tested as request separation;
 model resistance to prompt injection remains unverified.
 
-GitHub workflow execution, actual inline-comment acceptance, merge-blocking rule
-enforcement, Haiku accuracy/cost, Sonnet comparison and Julia's independent
-explanation are **Unknown**. Python 3.12 execution is specified in CI but has not
-yet been observed. Initial checks were local with no remote; Julia authorized
-private publication on October 4. The project stores no credential. GitHub CI
-results must be observed separately after pushing.
+Actual inline-comment acceptance, merge-blocking rule enforcement, Haiku
+accuracy/cost, Sonnet comparison and Julia's independent explanation are **Unknown**.
+The project stores no credential.
+
+## Private publication — October 4
+
+Julia authorized a private GitHub release. The repository
+`YKalcheuskaya/claude-pr-review` was created with `isPrivate: true`, and the approved
+`pr_review` rename was published in commit `db28be8fc7775997574f9b37f780f1b8faa37889`.
+The [first Verify run](https://github.com/YKalcheuskaya/claude-pr-review/actions/runs/37246943855)
+passed both Python 3.10 and 3.12 jobs. Paid model calls, secrets, demo PRs and
+branch-protection changes were not part of this publication.
 
 Review [the delivery package](github-delivery.md) for the remaining experiment.

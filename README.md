@@ -3,8 +3,10 @@
 A focused GitHub Actions integration: open a pull request or push a new commit,
 receive Claude findings on diff lines, and block merge for high/critical findings.
 
-**Status — October 4, 2026:** implemented and tested locally; Julia authorized
-publication to a private GitHub repository. Live Claude calls, GitHub PR reviews
+**Status — October 4, 2026:** published to the private
+[GitHub repository](https://github.com/YKalcheuskaya/claude-pr-review). The
+[first Verify run](https://github.com/YKalcheuskaya/claude-pr-review/actions/runs/37246943855)
+passed on Python 3.10 and 3.12. Live Claude calls, GitHub PR reviews
 and branch-protection enforcement have not been demonstrated for this project.
 Authored replay responses demonstrate software behavior, not model quality.
 The implementation was developed with AI assistance; Julia's independent explanation
