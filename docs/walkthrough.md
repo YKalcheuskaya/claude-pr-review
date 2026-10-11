@@ -1,58 +1,22 @@
-# Version 2 offline walkthrough
+# Offline walkthrough
 
-1. Run `python scripts/run-tests.py` without provider credentials. Distinguish deterministic mechanism verification from observed model quality.
-2. Run `python scripts/evaluate-v2.py prepare --split development --output outputs/walkthrough`. Inspect a generated input and its fixture repository: mode, title/body, fixed snapshots, diff and actual policy hashes are part of identity. Oracle labels are outside the model input.
-3. Inspect `ContextReader` and `tests/test-context.py`: explain Git object reads, before/after/target, a literal caller search, line limits, denied credentials and evidence IDs. Changing the worktree cannot change the fixed snapshot.
-4. Inspect `tests/test-v2.py`: the real installed SDK receives mocked tool_use, the immediate tool_result and a final request with no tools. Reconstruct the cited unchanged caller and changed hunk anchor.
-5. Explain why a clean partial review succeeds with INCOMPLETE REVIEW, and why malformed output, an invented citation or stale metadata fails. A citation does not prove the defect is real.
-6. Inspect a local diagnostic bundle under `outputs/diagnostics`: trace ID, snapshots, operation starts/ends/errors, requests/responses and context source IDs. Find the exact available response without rerunning the model. Missing end events indicate interruption, not a proven server failure.
-7. Explain cache reuse and ambiguous publication: identity includes PR metadata and actual policies; new execution data does not. One POST is followed by read-only reconciliation when uncertain.
-8. Read the v2 delivery package and pilot budget. Publication, workflow activation and live calls are separately authorized. A red check requires a protection rule to block merge.
+Start with the [complete README commands](../README.md#complete-offline-v2-example). Use a fresh output directory and the project virtual environment. No provider credential or GitHub access is required. The authored replay proves result and payload contracts, not model quality.
 
-This checklist is preparation, not an observed independent assessment. Julia's uncoached explanation remains unverified.
+1. Inspect the prepared `context-input.json`: mode, title/body, before/after/target commits and actual policy hashes bind identity. The fixture repository contains source, not held-out oracle labels.
+2. Inspect `result.json`: zero calls, `live: false`, complete coverage and success for this authored clean response. Sources are empty because only cited metadata enters the result.
+3. Inspect `payload.json`: COMMENT event, generated head commit, no inline comments, hidden cache marker. Dry-run creates a file without a POST.
+4. For evidence-linked findings, inspect `finding()` and `test_body_only_finding_and_inline_anchor` in [v2 tests](../tests/test-v2.py). References derive from real Git blobs; a changed hunk receives an inline anchor, while an unchanged caller can appear in the body. A high finding fails the default severity gate; the threshold is configurable in the [User Guide](../README.md#user-guide).
+5. Inspect [context tests](../tests/test-context.py) for immutable Git reads, literal searches, line limits and denied inputs. The known raw-diff/serialized-secret gaps remain open; bounded exclusions are not a secret-disclosure guarantee.
+6. Inspect diagnostic manifests/events/context. Missing end events indicate interruption, not proven server rejection. Redaction/truncation limits exact reconstruction.
+7. Trace cache identity and uncertain publication in [service code](../src/pr_review/service.py). One POST is followed by read-only reconciliation when uncertain; no automatic write retry is safe.
 
----
+A valid partial review below the configured failing severity passes with INCOMPLETE REVIEW. A citation validates source integrity, not the interpretation. See [architecture limitations](v2-architecture.md), [troubleshooting](v2-troubleshooting.md) and the separate [live observations](v2-live-verification-2026-10-11.md).
 
-## Historical v1 walkthrough
+## Historical v1 replay
 
-# Explain the project
+```sh
+PYTHONPATH=src .venv/bin/python -m pr_review.cli analyze --input evaluation/input.json --recorded evaluation/clean-response.json --output outputs/v1-result.json
+PYTHONPATH=src .venv/bin/python -m pr_review.cli publish --input evaluation/input.json --result outputs/v1-result.json --dry-run --output outputs/v1-payload.json
+```
 
-Use these prompts to practice in English. Reading this guide is not an assessment.
-
-## One-minute overview
-
-“This project integrates Claude into GitHub Actions to review pull requests.
-Opening a PR or pushing another commit triggers a read-only analysis job. It
-collects the diff, calls Claude once, and validates the structured findings.
-A separate publisher posts inline comments and fails a required check for high
-or critical findings. The model cannot push code or merge. I test the integration
-with recorded responses separately from measuring the model's review quality.”
-
-## Trace one finding
-
-1. Read `demo.py`: explain why `completed == maximum` must return false.
-2. Read the evaluation diff: explain the `<` to `<=` regression and its boundary.
-3. Trace `prepare`: PR API identity, merge base, pinned Git diff, current snapshot.
-4. Trace `analyze`: cached review lookup, system prompt, schema, one API call.
-5. Trace `validate_content`: severity, LEFT/RIGHT, actual hunk lines, completeness.
-6. Trace `payload` and `publish`: commit-bound inline comment, marker, reconciliation.
-7. Explain why a published high finding and a failed gate are compatible outcomes.
-8. Explain why branch protection is needed to turn the failed check into a merge block.
-
-## Questions Julia should be able to answer
-
-- Why use two jobs? Which credential does each job receive?
-- Which code comes from the PR and which code executes in the privileged jobs?
-- What happens when Claude times out or produces an invalid line number?
-- How do reruns avoid duplicate findings and additional model calls?
-- What happens if another commit arrives before publication?
-- Why does a complete response not prove the code is correct?
-- How can a false positive block a PR? How would you investigate it?
-- What did the live experiment actually establish, and what remains unverified?
-
-Independent explanation is not yet demonstrated. The private live experiment
-verified clean/defect/fix reviews and cached rerun behavior, but model quality
-evidence is limited to those cases and severity was over-calibrated. The current
-private GitHub plan does not enforce merge blocking. Do not
-claim production use, independent implementation, hostile-code containment or
-general review accuracy from the local tests.
+Both commands return 0. This older diff-only path does not exercise v2 context tools. For actual v1 observations use the [dated report](live-verification-2026-10-05.md).

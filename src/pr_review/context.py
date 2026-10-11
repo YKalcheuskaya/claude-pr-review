@@ -6,9 +6,10 @@ import subprocess
 import time
 
 from .core import ReviewError, SHA, digest, locations, path_ok
+from .config import review_controls
 
 POLICY = {
-    "version": 2, "max_operations": 12, "max_paths": 10000, "max_reader_seconds": 300,
+    "version": 2, "max_paths": 10000, "max_reader_seconds": 300,
     "max_scan_bytes": 32 * 1024 * 1024, "max_blob_bytes": 256 * 1024,
     "max_read_bytes": 16 * 1024, "max_read_lines": 200,
     "list_page": 100, "search_page": 50,
@@ -43,6 +44,7 @@ class ContextReader:
             raise ReviewError("invalid context snapshot")
         self.data, self.diagnostics = data, diagnostics
         self.sources, self.limitations = [], []
+        self.max_operations = review_controls()["tool_operations"]
         self.operations = 0
         self._git_operations = 0
         self._deadline = time.monotonic() + POLICY["max_reader_seconds"]
@@ -203,7 +205,7 @@ class ContextReader:
 
     def execute(self, name, args):
         self.operations += 1
-        if self.operations > POLICY["max_operations"]:
+        if self.operations > self.max_operations:
             self._limit("tool operation limit reached")
             return {"ok": False, "error": "tool operation limit reached", "truncated": False, "next_cursor": None}
         try:

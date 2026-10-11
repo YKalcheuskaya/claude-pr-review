@@ -214,10 +214,76 @@ class V2(unittest.TestCase):
         with patch('pr_review.v2.time',NS(monotonic=unittest.mock.Mock(side_effect=[0,241]))):
             with self.assertRaises(ReviewError):analyze(self.data,client=client,repository_path=self.root)
         self.assertEqual(calls,[])
-    def test_unpriced_model_cannot_make_paid_call(self):
-        client,calls=self.mock_client();data={**self.data,'model':'claude-other-123'}
-        with self.assertRaises(ReviewError):analyze(data,client=client,repository_path=self.root)
-        self.assertEqual(calls,[])
+    def test_nondefault_model_reaches_preflight_and_generation_from_cli_environment(self):
+        from pr_review.cli import main
+        model = 'claude-selected-test-model'
+        variables = {'CLAUDE_MODEL': model, 'CLAUDE_INPUT_USD_PER_MILLION': '3',
+                     'CLAUDE_OUTPUT_USD_PER_MILLION': '15', 'CLAUDE_MAX_REVIEW_USD': '1'}
+        event = self.root / 'event.json'
+        event.write_text(json.dumps({'repository': {'full_name': 'fixture/repo'}, 'number': 1,
+                                    'pull_request': self.github.pr()}))
+        output = self.root / 'prepared.json'
+        with patch.dict(os.environ, variables), patch('pr_review.cli.api', return_value=self.github):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(main(['prepare', '--event', str(event), '--repository-path', str(self.root),
+                                       '--output', str(output), '--diagnostics-dir', str(self.root/'prepare-trace')]), 0)
+            data = json.loads(output.read_text())
+            self.assertEqual(data['model'], model)
+            client, calls = self.mock_client()
+            original = client.messages.create
+            def respond(**kwargs):
+                response = original(**kwargs)
+                response.model = model
+                return response
+            client.messages.create = respond
+            counts = []
+            def count(**kwargs):
+                counts.append(kwargs)
+                return NS(input_tokens=100)
+            client.messages.count_tokens = count
+            result = analyze(data, client=client, repository_path=self.root)
+            self.assertEqual(result['model'], model)
+            self.assertEqual(len(calls), 3)
+            self.assertTrue(all(call['model'] == model for call in calls + counts))
+            changed = prepare(self.github, 'fixture/repo', 1, self.root, model=model, mode='context')
+            self.assertEqual(data, changed)
+            with patch.dict(os.environ, {'CLAUDE_MAX_REVIEW_USD': '2'}):
+                with self.assertRaisesRegex(ReviewError, 'input.policy'):
+                    analyze(data, recorded=self.clean, repository_path=self.root)
+                fresh = prepare(self.github, 'fixture/repo', 1, self.root, model=model, mode='context')
+                self.assertNotEqual(data['policies'], fresh['policies'])
+                self.assertNotEqual(digest(data), digest(fresh))
+
+    def test_selected_model_without_prices_fails_before_provider(self):
+        client, calls = self.mock_client()
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(ReviewError, 'configuration'):
+                prepare(self.github, 'fixture/repo', 1, self.root,
+                        model='claude-selected-test-model', mode='context')
+        self.assertEqual(calls, [])
+
+    def test_configured_price_and_ceiling_bound_requests(self):
+        with patch.dict(os.environ, {'CLAUDE_INPUT_USD_PER_MILLION': '30',
+                                    'CLAUDE_OUTPUT_USD_PER_MILLION': '150',
+                                    'CLAUDE_MAX_REVIEW_USD': '0.01'}):
+            data = prepare(self.github, 'fixture/repo', 1, self.root, mode='context')
+            client, calls = self.mock_client()
+            with self.assertRaisesRegex(ReviewError, 'budget.cost'):
+                analyze(data, client=client, repository_path=self.root)
+            self.assertEqual(calls, [])
+
+    def test_provider_model_substitution_is_rejected_without_fallback(self):
+        client, calls = self.mock_client()
+        original = client.messages.create
+        def respond(**kwargs):
+            response = original(**kwargs)
+            response.model = 'claude-unrequested-model'
+            return response
+        client.messages.create = respond
+        with self.assertRaisesRegex(ReviewError, 'provider.model'):
+            analyze(self.data, client=client, repository_path=self.root)
+        self.assertEqual(len(calls), 1)
+
     def test_tool_content_in_artifact_and_never_console(self):
         client,calls=self.mock_client()
         capture=io.StringIO()

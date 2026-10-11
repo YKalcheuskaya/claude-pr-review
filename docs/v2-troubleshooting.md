@@ -33,7 +33,7 @@ Match jobs by run/attempt, PR and immutable base/head/merge-base snapshots; corr
 | Publication failure or unknown POST | Write operation, HTTP status, commit, review ID and reconciliation read | Check the PR's reviews read-only for the exact marker and snapshot. There must be one write attempt followed by read-only reconciliation, never a blind second POST. |
 | Missing diagnostics | Finalize/upload step status and platform logs | Upload is independent of the required result artifact. Failure to upload must remain visible; a bundle before Python startup may not exist. |
 
-A valid high/critical finding produces a failed gate by policy. A valid clean incomplete result produces success with a conspicuous warning. No valid final result, invalid evidence, stale snapshot or failed publication produces failure. An excluded PR has no review coverage. These are distinct outcomes; do not classify every failed gate as a model or network failure.
+A finding at or above the configured severity threshold produces a failed gate (high/critical by default). A valid clean incomplete result produces success with a conspicuous warning. No valid final result, invalid evidence, stale snapshot or failed publication produces failure. An excluded PR has no review coverage. These are distinct outcomes; do not classify every failed gate as a model or network failure.
 
 ## Sanitized examples
 
@@ -66,3 +66,7 @@ If redaction, the 10 MiB bundle limit, hard cancellation or upload failure remov
 A manual model rerun is appropriate only after identifying a concrete cause, ensuring the snapshot remains eligible, checking explicit paid authorization and reserving additional budget in the shared ledger. First use offline reproduction with the preserved response when feasible. Never repeat an ambiguous publication write: reconcile existing reviews read-only and require human inspection if identity remains uncertain. Do not activate a paused paid workflow or publish a change merely to investigate a trace. The local offline suite requires no provider credentials.
 
 For a handoff, provide the run/attempt/job, immutable snapshot, trace/operation ID, safe error code, relevant artifact record, completeness limitations and proposed next action. Exclude credentials, headers, environment dumps and unsanitized provider objects. This information should let another developer explain the stop without rerunning the model.
+
+## Sensitive-data and deadline caveats
+
+Sanitized traces are bounded pattern-based records, not guaranteed safe copies. The known raw-diff, credential-URL and serialized-password gaps can transmit or retain sensitive content (M-01); do not use diagnostic redaction as a provider-transmission guarantee. Generation timers do not cover all blocking preflight/Git reads (MD-02). Investigate elapsed time with platform logs as well as application events. See [architecture boundaries](v2-architecture.md).
