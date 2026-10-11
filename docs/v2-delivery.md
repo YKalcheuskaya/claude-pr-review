@@ -1,5 +1,7 @@
 # Version 2 local acceptance and private delivery package
 
+**Historical local checkpoint:** October 10, 2026. Subsequent authorized delivery and live results: [October 11 verification](v2-live-verification-2026-10-11.md). The pending states below describe the pre-delivery checkpoint.
+
 **Date:** October 10, 2026. **Scope:** local implementation and offline verification only. **Historical v1 checkpoint:** `a89a22a39372f1cfc8f40448fa572be63fd7862e`, preserved with its recorded inputs/results unchanged.
 
 ## Verified locally

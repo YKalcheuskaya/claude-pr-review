@@ -2,7 +2,7 @@
 
 A bounded GitHub PR reviewer that explores related code through read-only Git tools, publishes evidence-linked findings, and fails a check for high/critical defects. Merge blocking requires an independently configured required branch-protection rule.
 
-**October 10, 2026 — v2 local implementation.** Context tools, structured contracts, publication/cache validation, diagnostics, offline evaluation and authorization-gated pilot execution are implemented locally. The paid workflow remains paused remotely. Version 2 has not been published or tested against the live provider/GitHub; improved review quality is unverified. AI-assisted implementation and Julia's independent explanation are separate evidence dimensions.
+**October 11, 2026 — v2 delivered and live smoke verified.** Three private review snapshots exercised cross-file defect detection, correction and a clean JavaScript refactor; an unchanged rerun reused the result with zero new model calls and no duplicate review. The paid workflow is disabled after the bounded smoke. Coverage was partial and false positives occurred; improved general review quality and private merge enforcement remain unverified. See the [live evidence and limitations](docs/v2-live-verification-2026-10-11.md). AI-assisted implementation and Julia's independent explanation remain separate evidence dimensions.
 
 The private repository's historical v1 demonstration remains at `a89a22a39372f1cfc8f40448fa572be63fd7862e`: three Haiku reviews demonstrated clean/defect/fix, an inline finding, severity gating and duplicate-free reuse. Severity was over-calibrated; private merge-protection configuration returned HTTP 403. See the unchanged [v1 evidence](docs/live-verification-2026-10-05.md). These results do not establish v2 quality or enforcement.
 
@@ -59,6 +59,7 @@ For v2, `prepare --mode context` is the CLI default; `--mode diff` selects the p
 - [Troubleshooting and traces](docs/v2-troubleshooting.md)
 - [Evaluation and authorized pilot runner](docs/v2-evaluation.md)
 - [Offline walkthrough](docs/walkthrough.md)
-- [V2 local acceptance and delivery package](docs/v2-delivery.md)
+- [V2 live verification and limitations](docs/v2-live-verification-2026-10-11.md)
+- [V2 historical local acceptance and delivery package](docs/v2-delivery.md)
 
 Technical references checked October 10, 2026: [Anthropic client tools](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls), [structured output](https://platform.claude.com/docs/en/build-with-claude/structured-outputs), [pricing](https://platform.claude.com/docs/en/about-claude/pricing), [GitHub reviews](https://docs.github.com/en/rest/pulls/reviews), and [workflow commands](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands). First-party Haiku 4.5 rates currently list $1 input/$5 output per million tokens; availability/pricing must be rechecked immediately before separately authorized live work. No Sonnet comparison or model substitution is included.

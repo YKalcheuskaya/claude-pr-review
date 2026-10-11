@@ -1,5 +1,7 @@
 # Bounded private v2 end-to-end smoke
 
+Observed execution and limitations: [October 11 verification](v2-live-verification-2026-10-11.md). This document preserves the planning sequence; later explicit approvals supersede its pending release and additional-call gates.
+
 ## Authorization and prerequisites
 
 October 10, 2026: Julia requested closing v1 demo PRs and running two or three real end-to-end examples for v2. This authorizes the bounded private smoke, new demo branches/PRs, workflow activation for that smoke and provider calls within the existing $5 planning ceiling. The selected package reserves $0.60 for three review envelopes plus $0.20 for the cache verification run; the maximum planned reservation is $0.80, with no automatic retries or full held-out evaluation.
