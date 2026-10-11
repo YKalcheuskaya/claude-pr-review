@@ -14,6 +14,17 @@ concurrency:
 env:
   PYTHONPATH: src
   CLAUDE_MODEL: ${{ vars.CLAUDE_MODEL || 'claude-haiku-4-5-20251001' }}
+  CLAUDE_INPUT_USD_PER_MILLION: ${{ vars.CLAUDE_INPUT_USD_PER_MILLION }}
+  CLAUDE_OUTPUT_USD_PER_MILLION: ${{ vars.CLAUDE_OUTPUT_USD_PER_MILLION }}
+  CLAUDE_MAX_REVIEW_USD: ${{ vars.CLAUDE_MAX_REVIEW_USD }}
+  CLAUDE_REVIEW_MODE: ${{ vars.CLAUDE_REVIEW_MODE }}
+  CLAUDE_FAIL_SEVERITY: ${{ vars.CLAUDE_FAIL_SEVERITY }}
+  CLAUDE_MAX_EXPLORATION_CALLS: ${{ vars.CLAUDE_MAX_EXPLORATION_CALLS }}
+  CLAUDE_MAX_TOOL_OPERATIONS: ${{ vars.CLAUDE_MAX_TOOL_OPERATIONS }}
+  CLAUDE_MAX_INPUT_TOKENS: ${{ vars.CLAUDE_MAX_INPUT_TOKENS }}
+  CLAUDE_EXPLORATION_MAX_OUTPUT_TOKENS: ${{ vars.CLAUDE_EXPLORATION_MAX_OUTPUT_TOKENS }}
+  CLAUDE_FINAL_MAX_OUTPUT_TOKENS: ${{ vars.CLAUDE_FINAL_MAX_OUTPUT_TOKENS }}
+  CLAUDE_CACHE_ONLY: ${{ vars.CLAUDE_CACHE_ONLY || 'false' }}
   PYTHONDONTWRITEBYTECODE: '1'
 
 jobs:
@@ -47,15 +58,16 @@ jobs:
           git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $HEADER" fetch --no-tags origin "$HEAD_SHA"
       - name: Install pinned SDK from trusted base manifest
         run: python -m pip install -r requirements-lock.txt
+      - name: Validate effective configuration
+        run: python -m pr_review.cli show-config
       - name: Prepare exact input
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python -m pr_review.cli prepare --event "$GITHUB_EVENT_PATH" --mode context --output outputs/input.json
+        run: python -m pr_review.cli prepare --event "$GITHUB_EVENT_PATH" --output outputs/input.json
       - name: Analyze or reuse existing review
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          CLAUDE_CACHE_ONLY: ${{ vars.CLAUDE_CACHE_ONLY || 'false' }}
         run: python -m pr_review.cli analyze --input outputs/input.json --output outputs/result.json
       - name: Transfer validated result
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

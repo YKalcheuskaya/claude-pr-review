@@ -49,6 +49,18 @@ class EvaluationV2(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ev.materialize(Path(tmp), {"../escape.py": "bad"})
 
+    def test_freeze_cli_normalizes_blank_model_and_rejects_invalid_config(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict('os.environ', {'CLAUDE_MODEL': '   '}):
+            seal = Path(tmp)/'freeze.json'
+            policy = Path(tmp)/'policy.txt'
+            policy.write_text('test-only policy')
+            self.assertEqual(ev.main(['freeze', '--policy', str(policy), '--output', str(seal)]), 0)
+            self.assertEqual(ev.verify_freeze(seal)['model'], ev.MODEL)
+            with patch.dict('os.environ', {'CLAUDE_MODEL': 'small'}):
+                with self.assertRaises(ValueError):
+                    ev.main(['freeze', '--policy', str(policy), '--output', str(Path(tmp)/'invalid.json')])
+                self.assertFalse((Path(tmp)/'invalid.json').exists())
+
     def test_freeze_detects_drift(self):
         with tempfile.TemporaryDirectory() as tmp:
             policy, seal = Path(tmp) / "policy.txt", Path(tmp) / "freeze.json"
@@ -154,15 +166,38 @@ class PaidExecutionAdapter(unittest.TestCase):
     def setup_case(self, tmp):
         import sys
         sys.path.insert(0, str(ROOT / "src"))
-        from pr_review import v2, context
+        from pr_review import v2, context, config
         directory = ev.prepare_case(ev.cases("held-out")[0], tmp)
         seal = Path(tmp) / "freeze.json"
-        ev.freeze(seal, [v2.__file__, context.__file__])
+        ev.freeze(seal, [v2.__file__, context.__file__, config.__file__, Path(v2.__file__).with_name("review-policy.md")])
         return dict(input_path=directory / "context-input.json", repository_path=directory / "repository",
                     output=Path(tmp) / "result.json", diagnostics_dir=Path(tmp) / "diagnostics",
                     ledger_path=Path(tmp) / "ledger.json", seal_path=seal, run_id="test-run",
                     authorize_paid=True, authorization_reference="separately-recorded-human-approval",
                     pricing_reference="dated-provider-price-reference", input_rate="1", output_rate="5")
+
+    def test_selected_model_and_prices_are_preserved_by_adapter(self):
+        from pr_review import v2, context, config
+        with tempfile.TemporaryDirectory() as tmp, patch.dict('os.environ', {
+                'CLAUDE_INPUT_USD_PER_MILLION': '3', 'CLAUDE_OUTPUT_USD_PER_MILLION': '15',
+                'CLAUDE_MAX_REVIEW_USD': '1'}):
+            model = 'claude-selected-test-model'
+            directory = ev.prepare_case(ev.cases('development')[0], tmp, model=model)
+            seal = Path(tmp) / 'freeze.json'
+            ev.freeze(seal, [v2.__file__, context.__file__, config.__file__, Path(v2.__file__).with_name("review-policy.md")], model=model)
+            data = ev.read(directory / 'context-input.json')
+            result = v2.analyze(data, recorded={'status': 'complete', 'summary': 'Authored replay',
+                                'findings': [], 'limitations': []}, repository_path=directory/'repository')
+            with patch('pr_review.v2.analyze', return_value=result) as analyze:
+                ev.run_paid(input_path=directory/'context-input.json', repository_path=directory/'repository',
+                            output=Path(tmp)/'result.json', diagnostics_dir=Path(tmp)/'trace',
+                            ledger_path=Path(tmp)/'ledger.json', seal_path=seal, run_id='selected',
+                            authorize_paid=True, authorization_reference='test-only', pricing_reference='test-only',
+                            input_rate='3', output_rate='15')
+                self.assertEqual(analyze.call_args.args[0]['model'], model)
+            row = ev.read(Path(tmp)/'ledger.json')['entries'][0]
+            self.assertEqual(ev.money(row['reserved_usd']), 1)
+            self.assertEqual(row['input_usd_per_million'], '3')
 
     def test_no_authorization_means_no_call(self):
         with tempfile.TemporaryDirectory() as tmp:

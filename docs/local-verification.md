@@ -1,4 +1,6 @@
-# Release verification — updated 2026-10-04
+# Historical release verification — updated 2026-10-04
+
+This is the original dated v1 checkpoint, not current verification. Later observations: [October 5](live-verification-2026-10-05.md), [October 11](v2-live-verification-2026-10-11.md). The unknowns below describe the checkpoint date.
 
 ## Verified
 
@@ -19,8 +21,6 @@
   base checkout, credential separation, always-run gate and candidate CI boundaries.
 - Python compilation and `pip check` passed. Whitespace, staged-path, credential
   and documentation-link checks are part of the final local checkpoint review.
-- The older AI Pipeline remains at `dfd2ad18bdfafb780d11d8c8fc1114b3c02283fd`, with
-  the same pre-existing untracked `.idea/` path and no implementation changes.
 
 ## Evidence limits
 

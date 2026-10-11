@@ -97,18 +97,22 @@ def git(repository_path, *args):
     from .core import MAX_BYTES
     env = {k:v for k,v in os.environ.items() if not k.startswith('GIT_')}
     env.update(GIT_NO_REPLACE_OBJECTS='1',GIT_CONFIG_NOSYSTEM='1',GIT_CONFIG_GLOBAL=os.devnull)
-    def timeout_handler(signum,frame): raise TimeoutError()
+    def timeout_handler(signum,frame):
+        raise TimeoutError()
     previous = signal.signal(signal.SIGALRM,timeout_handler)
     try:
         signal.setitimer(signal.ITIMER_REAL,60)
         with subprocess.Popen(['git','-C',str(repository_path),*args],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env=env) as process:
             try:
                 raw=process.stdout.read(MAX_BYTES+1)
-                if len(raw)>MAX_BYTES: raise ReviewError('snapshot.diff: output exceeds 60 KiB')
-                if process.wait(timeout=60): raise ReviewError('snapshot.git: collection failed')
+                if len(raw)>MAX_BYTES:
+                    raise ReviewError('snapshot.diff: output exceeds 60 KiB')
+                if process.wait(timeout=60):
+                    raise ReviewError('snapshot.git: collection failed')
                 return raw.decode('utf-8')
             finally:
-                if process.poll() is None: process.kill()
+                if process.poll() is None:
+                    process.kill()
                 process.wait(timeout=5)
     except (subprocess.SubprocessError,UnicodeError,TimeoutError):
         raise ReviewError('snapshot.git: collection failed or timed out') from None
@@ -136,7 +140,7 @@ def prepare(github, repository, pr_number, repository_path, model=DEFAULT_MODEL,
     if mode is not None:
         from .v2 import policies
         changed_files = list(validate_input(data))
-        data.update(version=2, config="v2", mode=mode, metadata={"title": pr.get("title") or "", "body": pr.get("body") or ""}, policies=policies(), changed_files=changed_files)
+        data.update(version=2, config="v2", mode=mode, metadata={"title": pr.get("title") or "", "body": pr.get("body") or ""}, policies=policies(model), changed_files=changed_files)
     validate_input(data)
     assert_current(github, data)
     return data
@@ -172,7 +176,8 @@ def analyze(data, github=None, recorded=None, client=None, repository_path=".", 
     if data.get("version") == 2:
         from .v2 import analyze as v2_analyze
         return v2_analyze(data, github, recorded, client, repository_path, diagnostics, cache_only)
-    if cache_only: raise ReviewError("cache.mode: cache-only requires v2")
+    if cache_only:
+        raise ReviewError("cache.mode: cache-only requires v2")
     validate_input(data)
     if github:
         assert_current(github, data)
@@ -240,19 +245,25 @@ def publish(data, result, github, repository_path=".", diagnostics=None):
     assert_current(github, data)
     previous = cached_result(github.reviews(), data)
     if previous is not None:
-        if diagnostics: diagnostics.event("cache.hit", current_calls=0, current_cost=0, origin_identity=previous["identity"])
+        if diagnostics:
+            diagnostics.event("cache.hit", current_calls=0, current_cost=0, origin_identity=previous["identity"])
         if previous != result:
             raise ReviewError("published result conflicts with this artifact")
         return gate(previous)
     try:
-        if diagnostics: diagnostics.event("publication.start", method="POST", route="/pulls/reviews", commit=data["head"])
+        if diagnostics:
+            diagnostics.event("publication.start", method="POST", route="/pulls/reviews", commit=data["head"])
         published = github.post(payload(data, result))
-        if diagnostics: diagnostics.event("publication.end", review_id=(published or {}).get("id"), review_url=(published or {}).get("html_url"), comments=len(result["content"]["findings"]))
+        if diagnostics:
+            diagnostics.event("publication.end", review_id=(published or {}).get("id"), review_url=(published or {}).get("html_url"), comments=len(result["content"]["findings"]))
     except ReviewError:
-        if diagnostics: diagnostics.event("reconciliation.start", writes=1)
-        # Read after an uncertain write. Never blindly send a second POST.
+        if diagnostics:
+            diagnostics.event("reconciliation.start", writes=1)
+        # A failed response can follow a successful write. Reconcile the cached
+        # result with a read; a second POST could duplicate the review.
         recovered = cached_result(github.reviews(), data)
-        if diagnostics: diagnostics.event("reconciliation.end", recovered=recovered == result)
+        if diagnostics:
+            diagnostics.event("reconciliation.end", recovered=recovered == result)
         if recovered != result:
             raise ReviewError("publication uncertain or failed; inspect GitHub before retry") from None
     assert_current(github, data)

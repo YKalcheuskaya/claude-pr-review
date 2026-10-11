@@ -26,6 +26,24 @@ class CliScenarios(unittest.TestCase):
                                           "--dry-run", "--output", body]), expected)
                 self.assertEqual(json.loads(Path(body).read_text())["event"], "COMMENT")
 
+    def test_blank_model_uses_default_for_preparation_and_publication(self):
+        from pr_review.cli import args_model
+        from pr_review.core import DEFAULT_MODEL
+        data = json.loads((ROOT/'evaluation/input.json').read_text())
+        data['model'] = DEFAULT_MODEL
+        with tempfile.TemporaryDirectory() as directory, patch.dict('os.environ', {'CLAUDE_MODEL': ''}):
+            event = Path(directory)/'event.json'
+            event.write_text(json.dumps({'repository': {'full_name': data['repository']},
+                                        'number': data['pr'], 'pull_request': {
+                                        'base': {'sha': data['base']}, 'head': {'sha': data['head']}}}))
+            with patch('pr_review.cli.api'), patch('pr_review.cli.prepare', return_value=data) as prepare:
+                with contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(main(['prepare', '--event', str(event), '--output',
+                                           str(Path(directory)/'input.json'), '--diagnostics-dir',
+                                           str(Path(directory)/'trace')]), 0)
+            self.assertEqual(prepare.call_args.kwargs['model'], DEFAULT_MODEL)
+            self.assertEqual(args_model(data), DEFAULT_MODEL)
+
     def test_invalid_json_has_failure_exit(self):
         with tempfile.TemporaryDirectory() as directory:
             file = Path(directory) / "invalid.json"

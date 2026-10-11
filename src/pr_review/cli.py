@@ -1,4 +1,4 @@
-"""Three explicit commands; offline publish emits a payload without networking."""
+"""Review commands, offline configuration preview and dry-run publication."""
 import argparse
 import json
 import os
@@ -7,6 +7,7 @@ import sys
 
 from .core import DEFAULT_MODEL, ReviewError, gate, payload, validate_input
 from .service import Github, analyze, prepare, publish
+from .config import selected_model, review_controls, effective_config, cache_only_mode
 
 
 def read(path):
@@ -32,9 +33,9 @@ def main(argv=None):
     p = commands.add_parser("prepare")
     p.add_argument("--event", required=True)
     p.add_argument("--repository-path", default=".")
-    p.add_argument("--model", default=os.environ.get("CLAUDE_MODEL", DEFAULT_MODEL))
+    p.add_argument("--model")
     p.add_argument("--output", required=True)
-    p.add_argument("--mode", choices=("context", "diff"), default="context")
+    p.add_argument("--mode", choices=("context", "diff"), default=None)
     a = commands.add_parser("analyze")
     a.add_argument("--input", required=True)
     a.add_argument("--recorded")
@@ -48,11 +49,25 @@ def main(argv=None):
     p.add_argument("--event")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--output")
+    c = commands.add_parser("show-config", help="Validate and print effective settings without API calls")
+    c.add_argument("--model")
     f = commands.add_parser("finalize-diagnostics")
     f.add_argument("--outcome", default="unknown")
-    for command in (p, a, commands.choices["prepare"], f):
+    for command in (p, a, commands.choices["prepare"], f, c):
         command.add_argument("--diagnostics-dir", default="outputs/diagnostics")
     args = parser.parse_args(argv)
+    if args.command == "show-config":
+        try:
+            from .v2 import system_prompt, policies
+            settings = effective_config(args.model)
+            settings["cache_only"] = cache_only_mode()
+            settings["prompt"] = system_prompt()
+            settings["policies"] = policies(settings["model"])
+            print(json.dumps(settings, indent=2))
+            return 0
+        except ReviewError as error:
+            print(str(error), file=sys.stderr)
+            return 2
     from .diagnostics import Diagnostics
     diagnostics = Diagnostics(args.diagnostics_dir, args.command)
     outcome = "failure"
@@ -68,7 +83,7 @@ def main(argv=None):
             import re
             if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", identity["repository"]) or type(identity["pr"]) is not int or identity["pr"] < 1:
                 raise ReviewError("invalid event identity")
-            data = prepare(api(identity, diagnostics), **{"repository": identity["repository"], "pr_number": identity["pr"], "repository_path": args.repository_path, "model": args.model, "mode": args.mode})
+            data = prepare(api(identity, diagnostics), **{"repository": identity["repository"], "pr_number": identity["pr"], "repository_path": args.repository_path, "model": args.model or selected_model(), "mode": args.mode or review_controls()["mode"]})
             event_pr = event["pull_request"]
             if data["base"] != event_pr["base"]["sha"] or data["head"] != event_pr["head"]["sha"]:
                 raise ReviewError("event snapshot is stale; no model call")
@@ -83,7 +98,7 @@ def main(argv=None):
                 raise ReviewError("input.mode: mode differs from prepared identity")
             if args.command == "analyze":
                 result = analyze(data, recorded=read(args.recorded) if args.recorded else None,
-                                 github=None if args.recorded else api(data, diagnostics), repository_path=args.repository_path, diagnostics=diagnostics, cache_only=args.cache_only or os.environ.get("CLAUDE_CACHE_ONLY") == "true")
+                                 github=None if args.recorded else api(data, diagnostics), repository_path=args.repository_path, diagnostics=diagnostics, cache_only=args.cache_only or cache_only_mode())
                 write(args.output, result)
             else:
                 result = read(args.result)
@@ -130,7 +145,7 @@ def main(argv=None):
 
 
 def args_model(data):
-    configured = os.environ.get("CLAUDE_MODEL", DEFAULT_MODEL)
+    configured = selected_model()
     if data["model"] != configured:
         raise ReviewError("artifact model differs from trusted configuration")
     return configured

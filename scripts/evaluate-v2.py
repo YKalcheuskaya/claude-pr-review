@@ -1,4 +1,8 @@
-"""Offline paired-corpus preparation and human-adjudicated reporting. No network calls."""
+"""Paired-corpus evaluation: offline preparation/reporting and an authorized paid runner.
+
+Preparation and reporting work without provider calls. The paid runner requires
+explicit authorization and can contact the provider; it is not an offline command.
+"""
 import argparse
 from collections import Counter
 from decimal import Decimal, InvalidOperation
@@ -61,7 +65,7 @@ def materialize(repo, files):
         destination.write_text(content, encoding="utf-8")
 
 
-def prepare_case(case, output):
+def prepare_case(case, output, model=MODEL):
     """Create one local Git repo and two validated inputs, without oracle labels."""
     directory = Path(output) / case["id"]
     if directory.exists():
@@ -95,13 +99,13 @@ def prepare_case(case, output):
             return metadata
 
     for mode in ("diff", "context"):
-        data = prepare(OfflineGithub(), repository, 1, repo, model=MODEL, mode=mode)
+        data = prepare(OfflineGithub(), repository, 1, repo, model=model, mode=mode)
         write(directory / f"{mode}-input.json", data)
     write(directory / "case-record.json", {"case_id": case["id"], "repository_path": str(repo.resolve())})
     return directory
 
 
-def freeze(output, policies):
+def freeze(output, policies, model=MODEL):
     """Seal corpus, oracle and actual prompt/policy files before held-out evaluation."""
     if Path(output).exists():
         raise ValueError("Freeze output already exists; do not overwrite historical seals")
@@ -110,7 +114,7 @@ def freeze(output, policies):
     if not policies:
         raise ValueError("Supply every actual prompt/schema/tool policy with --policy")
     files = {str(path.resolve()): sha(path) for path in sources + labels + [Path(p) for p in policies]}
-    value = {"version": 2, "model": MODEL, "files": files}
+    value = {"version": 2, "model": model, "files": files}
     value["freeze_id"] = hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
     write(output, value)
     return value
@@ -132,7 +136,7 @@ def verify_freeze(path):
 
 
 def reserve(ledger_path, run_id, mode, input_tokens, output_tokens, input_rate,
-            output_rate, authorization_reference, pricing_reference):
+            output_rate, authorization_reference, pricing_reference, review_cap=None):
     """Reserve full review envelope before any external request; this function never calls an API.
 
     Rate units are USD per million tokens. Tokens include all planned calls and final output.
@@ -147,19 +151,22 @@ def reserve(ledger_path, run_id, mode, input_tokens, output_tokens, input_rate,
     input_price, output_price = money(input_rate), money(output_rate)
     if input_price == 0 or output_price == 0:
         raise ValueError("Paid preflight requires positive verified rates")
+    cap = money(review_cap) if review_cap is not None else CAPS[mode]
+    if cap <= 0:
+        raise ValueError("Review ceiling must be positive")
     estimated = (input_tokens * input_price + output_tokens * output_price) / Decimal(1_000_000)
-    if estimated > CAPS[mode]:
+    if estimated > cap:
         raise ValueError("Conservative token estimate exceeds per-review ceiling; reduce review scope")
     ledger = read(ledger_path) if Path(ledger_path).exists() else {"version": 2, "entries": []}
     if any(row["run_id"] == run_id for row in ledger["entries"]):
         raise ValueError("Run already reserved; unknown calls must not be retried under the same reservation")
     # Hold the full per-review cap even after failures/unknown outcomes. No optimistic refunds.
     total = sum((money(row["reserved_usd"]) for row in ledger["entries"]), Decimal(0))
-    if total + CAPS[mode] > PILOT_CAP:
+    if total + cap > PILOT_CAP:
         raise ValueError("Aggregate pilot cap exhausted; the final $1 needs separate authorization")
     ledger["entries"].append({
         "run_id": run_id, "mode": mode, "status": "reserved-or-unknown",
-        "reserved_usd": str(CAPS[mode]), "preflight_estimate_usd": str(estimated),
+        "reserved_usd": str(cap), "preflight_estimate_usd": str(estimated),
         "input_tokens": input_tokens, "output_tokens": output_tokens,
         "input_usd_per_million": str(input_price), "output_usd_per_million": str(output_price),
         "authorization_reference": authorization_reference, "pricing_reference": pricing_reference,
@@ -197,14 +204,14 @@ def run_paid(input_path, repository_path, output, diagnostics_dir, ledger_path, 
     from pr_review.diagnostics import Diagnostics
     data = read(input_path)
     v2.validate_input(data)
-    if data["model"] != MODEL or seal["model"] != MODEL:
-        raise ValueError("Paid pilot requires the fixed planned Haiku model")
-    # Current implementation's conservative budget uses $1/$5 per million.
-    # Refuse higher submitted prices rather than silently exceed the envelope.
-    if money(input_rate) > Decimal("1") or money(output_rate) > Decimal("5"):
-        raise ValueError("Verified rates exceed implemented review budget; revise policy first")
-    from pr_review import context
-    required_policies = {str(Path(module.__file__).resolve()) for module in (v2, context)}
+    if data["model"] != seal["model"]:
+        raise ValueError("Prepared input model must match the frozen experiment model")
+    from pr_review.config import review_budget, review_controls
+    budget = review_budget(data["model"])
+    if money(input_rate) != money(budget["input_rate"]) or money(output_rate) != money(budget["output_rate"]):
+        raise ValueError("Verified rates must match configured input/output rates; reprepare inputs after changes")
+    from pr_review import context, config
+    required_policies = {str(Path(module.__file__).resolve()) for module in (v2, context, config)} | {str(Path(v2.__file__).with_name('review-policy.md').resolve())}
     if not required_policies.issubset(seal["files"]):
         raise ValueError("Freeze must include actual v2 prompt/schema and context/tool policy modules")
     repo = Path(repository_path).resolve()
@@ -216,15 +223,17 @@ def run_paid(input_path, repository_path, output, diagnostics_dir, ledger_path, 
         "--no-textconv", "--no-color", "--unified=3", "--find-renames", data["merge_base"], data["head"], "--"], text=True)
     if actual_diff != data["diff"]:
         raise ValueError("Input diff does not match fixture snapshots")
-    # Every possible SDK request reserves 24k input; 4 research outputs + final.
-    input_tokens = 120000 if data["mode"] == "context" else 24000
-    output_tokens = 12000 if data["mode"] == "context" else 4000
+    # Reserve the actual configured maximum, including the final request.
+    controls = review_controls()
+    research_calls = controls["research_calls"] if data["mode"] == "context" else 0
+    input_tokens = controls["input_tokens"] * (research_calls + 1)
+    output_tokens = controls["research_output"] * research_calls + controls["final_output"]
     diagnostics = Diagnostics(diagnostics_dir, "evaluation")
     try:
         reserve(ledger_path, run_id, data["mode"], input_tokens, output_tokens,
-                input_rate, output_rate, authorization_reference, pricing_reference)
+                input_rate, output_rate, authorization_reference, pricing_reference, review_cap=budget["max_cost"])
         diagnostics.event("evaluation.reserved", run_id=run_id, freeze_id=seal["freeze_id"],
-                          reserved_usd=str(CAPS[data["mode"]]), snapshots={key: data[key] for key in ("base", "head", "merge_base")})
+                          reserved_usd=budget["max_cost"] or str(CAPS[data["mode"]]), snapshots={key: data[key] for key in ("base", "head", "merge_base")})
         result = v2.analyze(data, github=None, repository_path=repo, diagnostics=diagnostics)
         v2.validate_result(result, data)
         write(output, result)
@@ -240,7 +249,7 @@ def report(record_path, seal_path):
     """Score human-adjudicated recorded outputs; never infer matching from model wording."""
     seal = verify_freeze(seal_path)
     recorded = read(record_path)
-    if recorded.get("freeze_id") != seal["freeze_id"] or recorded.get("model") != MODEL:
+    if recorded.get("freeze_id") != seal["freeze_id"] or recorded.get("model") != seal["model"]:
         raise ValueError("Results must reference the same frozen policy set and planned model")
     expected = {case["id"]: read(CORPUS / "labels" / (case["id"] + ".json"))["expected"]
                 for case in cases("held-out")}
@@ -324,9 +333,11 @@ def main(argv=None):
     commands = parser.add_subparsers(dest="command", required=True)
     prepare = commands.add_parser("prepare")
     prepare.add_argument("--output", required=True)
+    prepare.add_argument("--model", default=None)
     prepare.add_argument("--split", choices=["development", "held-out"], default="development")
     freeze_cmd = commands.add_parser("freeze")
     freeze_cmd.add_argument("--output", required=True)
+    freeze_cmd.add_argument("--model", default=None)
     freeze_cmd.add_argument("--policy", action="append", required=True)
     score = commands.add_parser("report")
     score.add_argument("--records", required=True)
@@ -349,11 +360,15 @@ def main(argv=None):
     live.add_argument("--authorize-paid", action="store_true",
                       help="Record existing explicit human authorization; this flag is not authorization itself")
     args = parser.parse_args(argv)
+    if args.command in ("prepare", "freeze"):
+        sys.path.insert(0, str(ROOT / "src"))
+        from pr_review.config import effective_config
+        args.model = effective_config(args.model)["model"]
     if args.command == "prepare":
         for case in cases(args.split):
-            prepare_case(case, args.output)
+            prepare_case(case, args.output, args.model)
     elif args.command == "freeze":
-        freeze(args.output, args.policy)
+        freeze(args.output, args.policy, args.model)
     elif args.command == "report":
         write(args.output, report(args.records, args.freeze))
     elif args.command == "reserve":

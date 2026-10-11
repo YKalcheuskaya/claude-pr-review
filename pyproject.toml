@@ -16,3 +16,6 @@ claude-pr-review = "pr_review.cli:main"
 where = ["src"]
 namespaces = true
 include = ["pr_review*"]
+
+[tool.setuptools.package-data]
+pr_review = ["review-policy.md"]
