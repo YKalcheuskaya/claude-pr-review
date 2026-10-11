@@ -1,0 +1,7 @@
+{
+  "case_id": "heldout-07",
+  "expected": [],
+  "rationale": "Explicit @PathVariable(\"id\") preserves binding despite the local Java variable rename.",
+  "provenance": "Synthetic seeded example; maintainer-defined oracle, not a real production incident.",
+  "review_status": "draft; human label review required before a paid pilot"
+}

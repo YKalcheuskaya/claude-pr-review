@@ -1,0 +1,15 @@
+{
+  "id": "development-02",
+  "split": "development",
+  "stack": "java-spring",
+  "title": "Update application behavior",
+  "body": "Review this change and its repository contracts.",
+  "before": {
+    "service.java": "class service {\n  int limit = 20;\n  int pageSize() { return limit; }\n}\n",
+    "application.properties": "spring.data.web.pageable.max-page-size=100\n"
+  },
+  "after": {
+    "service.java": "class service {\n  int limit = 20;\n  int pageSize() { return limit; }\n}\n",
+    "application.properties": "spring.data.web.pageable.max-page-size=200\n"
+  }
+}

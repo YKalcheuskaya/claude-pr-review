@@ -1,0 +1,18 @@
+{
+  "case_id": "heldout-09",
+  "expected": [
+    {
+      "id": "regression-1",
+      "severity": "high",
+      "changed_path": "api.ts",
+      "related_paths": [
+        "route.ts",
+        "user-card.tsx"
+      ],
+      "behavior": "The server still returns name; undefined reaches the React component and toUpperCase throws."
+    }
+  ],
+  "rationale": "Requires unchanged API producer and React consumer.",
+  "provenance": "Synthetic seeded example; maintainer-defined oracle, not a real production incident.",
+  "review_status": "draft; human label review required before a paid pilot"
+}

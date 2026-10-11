@@ -1,0 +1,7 @@
+{
+  "case_id": "heldout-04",
+  "expected": [],
+  "rationale": "Moving the parameterized SQL into a variable preserves safety and the schema contract.",
+  "provenance": "Synthetic seeded example; maintainer-defined oracle, not a real production incident.",
+  "review_status": "draft; human label review required before a paid pilot"
+}

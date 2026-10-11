@@ -1,0 +1,15 @@
+{
+  "id": "development-01",
+  "split": "development",
+  "stack": "python",
+  "title": "Update application behavior",
+  "body": "Review this change and its repository contracts.",
+  "before": {
+    "app.py": "from storage import find_user\ndef profile(user_id):\n    user = find_user(user_id)\n    return {\"name\": user[\"name\"]}\n",
+    "storage.py": "def find_user(user_id):\n    return {\"name\": \"Julia\"} if user_id == 1 else None\n"
+  },
+  "after": {
+    "app.py": "from storage import find_user\ndef profile(user_id):\n    user = find_user(user_id)\n    return {\"name\": user[\"name\"]}\n",
+    "storage.py": "def find_user(user_id):\n    return {\"name\": \"Julia\"} if user_id == 1 else {}\n"
+  }
+}

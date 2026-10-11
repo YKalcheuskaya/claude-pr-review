@@ -1,0 +1,17 @@
+{
+  "case_id": "heldout-10",
+  "expected": [
+    {
+      "id": "regression-1",
+      "severity": "high",
+      "changed_path": "db.js",
+      "related_paths": [
+        "schema.sql"
+      ],
+      "behavior": "Prepared insert references absent display_name column."
+    }
+  ],
+  "rationale": "Unchanged SQL establishes the mismatch.",
+  "provenance": "Synthetic seeded example; maintainer-defined oracle, not a real production incident.",
+  "review_status": "draft; human label review required before a paid pilot"
+}

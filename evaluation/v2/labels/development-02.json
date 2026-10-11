@@ -1,0 +1,7 @@
+{
+  "case_id": "development-02",
+  "expected": [],
+  "rationale": "A valid Spring paging limit change does not affect the independent service default.",
+  "provenance": "Synthetic seeded example; maintainer-defined oracle, not a real production incident.",
+  "review_status": "draft; human label review required before a paid pilot"
+}

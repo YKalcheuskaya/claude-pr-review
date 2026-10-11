@@ -1,0 +1,17 @@
+{
+  "id": "heldout-02",
+  "split": "held-out",
+  "stack": "python",
+  "title": "Update application behavior",
+  "body": "Review this change and its repository contracts.",
+  "before": {
+    "settings.py": "import os\nPORT = int(os.environ.get(\"APP_PORT\", \"8000\"))\n",
+    "server.py": "from settings import PORT\ndef listen(socket):\n    socket.bind((\"127.0.0.1\", PORT))\n",
+    "deploy.yaml": "env:\n  APP_PORT: \"9000\"\n"
+  },
+  "after": {
+    "settings.py": "import os\nPORT = os.environ.get(\"APP_PORT\", \"8000\")\n",
+    "server.py": "from settings import PORT\ndef listen(socket):\n    socket.bind((\"127.0.0.1\", PORT))\n",
+    "deploy.yaml": "env:\n  APP_PORT: \"9000\"\n"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "id": "heldout-09",
+  "split": "held-out",
+  "stack": "js-ts-react",
+  "title": "Update application behavior",
+  "body": "Review this change and its repository contracts.",
+  "before": {
+    "api.ts": "export async function loadName(): Promise<string> {\n  const response = await fetch(\"/api/user\");\n  const data = await response.json();\n  return data.name;\n}\n",
+    "user-card.tsx": "import { useEffect, useState } from \"react\";\nimport { loadName } from \"./api\";\nexport function UserCard() {\n  const [name, setName] = useState(\"\");\n  useEffect(() => { loadName().then(setName); }, []);\n  return <strong>{name.toUpperCase()}</strong>;\n}\n",
+    "route.ts": "export function user() { return { name: \"Julia\" }; }\n"
+  },
+  "after": {
+    "api.ts": "export async function loadName(): Promise<string> {\n  const response = await fetch(\"/api/user\");\n  const data = await response.json();\n  return data.displayName;\n}\n",
+    "user-card.tsx": "import { useEffect, useState } from \"react\";\nimport { loadName } from \"./api\";\nexport function UserCard() {\n  const [name, setName] = useState(\"\");\n  useEffect(() => { loadName().then(setName); }, []);\n  return <strong>{name.toUpperCase()}</strong>;\n}\n",
+    "route.ts": "export function user() { return { name: \"Julia\" }; }\n"
+  }
+}

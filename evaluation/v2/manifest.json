@@ -1,0 +1,82 @@
+{
+  "version": 2,
+  "model": "claude-haiku-4-5-20251001",
+  "status": "offline corpus only; no paid quality evidence",
+  "cases": [
+    {
+      "id": "development-01",
+      "split": "development",
+      "stack": "python"
+    },
+    {
+      "id": "development-02",
+      "split": "development",
+      "stack": "java-spring"
+    },
+    {
+      "id": "development-03",
+      "split": "development",
+      "stack": "js-ts-react"
+    },
+    {
+      "id": "heldout-01",
+      "split": "held-out",
+      "stack": "python"
+    },
+    {
+      "id": "heldout-02",
+      "split": "held-out",
+      "stack": "python"
+    },
+    {
+      "id": "heldout-03",
+      "split": "held-out",
+      "stack": "python"
+    },
+    {
+      "id": "heldout-04",
+      "split": "held-out",
+      "stack": "python"
+    },
+    {
+      "id": "heldout-05",
+      "split": "held-out",
+      "stack": "java-spring"
+    },
+    {
+      "id": "heldout-06",
+      "split": "held-out",
+      "stack": "java-spring"
+    },
+    {
+      "id": "heldout-07",
+      "split": "held-out",
+      "stack": "java-spring"
+    },
+    {
+      "id": "heldout-08",
+      "split": "held-out",
+      "stack": "java-spring"
+    },
+    {
+      "id": "heldout-09",
+      "split": "held-out",
+      "stack": "js-ts-react"
+    },
+    {
+      "id": "heldout-10",
+      "split": "held-out",
+      "stack": "js-ts-react"
+    },
+    {
+      "id": "heldout-11",
+      "split": "held-out",
+      "stack": "js-ts-react"
+    },
+    {
+      "id": "heldout-12",
+      "split": "held-out",
+      "stack": "js-ts-react"
+    }
+  ]
+}

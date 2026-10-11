@@ -1,0 +1,18 @@
+{
+  "case_id": "heldout-02",
+  "expected": [
+    {
+      "id": "regression-1",
+      "severity": "high",
+      "changed_path": "settings.py",
+      "related_paths": [
+        "server.py",
+        "deploy.yaml"
+      ],
+      "behavior": "PORT becomes a string but socket.bind requires an integer port."
+    }
+  ],
+  "rationale": "Requires caller contract; configured and fallback values both become strings.",
+  "provenance": "Synthetic seeded example; maintainer-defined oracle, not a real production incident.",
+  "review_status": "draft; human label review required before a paid pilot"
+}

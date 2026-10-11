@@ -1,0 +1,17 @@
+{
+  "case_id": "heldout-01",
+  "expected": [
+    {
+      "id": "regression-1",
+      "severity": "high",
+      "changed_path": "store.py",
+      "related_paths": [
+        "schema.sql"
+      ],
+      "behavior": "INSERT references display_name, absent from the users schema."
+    }
+  ],
+  "rationale": "Requires unchanged SQL schema; every insert now fails.",
+  "provenance": "Synthetic seeded example; maintainer-defined oracle, not a real production incident.",
+  "review_status": "draft; human label review required before a paid pilot"
+}

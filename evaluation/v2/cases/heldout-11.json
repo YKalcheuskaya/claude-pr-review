@@ -1,0 +1,17 @@
+{
+  "id": "heldout-11",
+  "split": "held-out",
+  "stack": "js-ts-react",
+  "title": "Update application behavior",
+  "body": "Review this change and its repository contracts.",
+  "before": {
+    "api.ts": "export const itemUrl = (id: string) => `/api/items/${encodeURIComponent(id)}`;\n",
+    "route.ts": "export const route = \"/api/items/:id\";\n",
+    "app-config.json": "{\"apiPrefix\":\"/api\"}\n"
+  },
+  "after": {
+    "api.ts": "export const itemUrl = (id: string) => {\n  const safeId = encodeURIComponent(id);\n  return `/api/items/${safeId}`;\n};\n",
+    "route.ts": "export const route = \"/api/items/:id\";\n",
+    "app-config.json": "{\"apiPrefix\":\"/api\"}\n"
+  }
+}

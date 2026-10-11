@@ -1,0 +1,15 @@
+{
+  "id": "heldout-03",
+  "split": "held-out",
+  "stack": "python",
+  "title": "Update application behavior",
+  "body": "Review this change and its repository contracts.",
+  "before": {
+    "normalize.py": "def normalize(value):\n    return value.strip().lower()\n",
+    "consumer.py": "from normalize import normalize\ndef user_key(name):\n    return \"user:\" + normalize(name)\n"
+  },
+  "after": {
+    "normalize.py": "def normalize(value):\n    cleaned = value.strip()\n    return cleaned.lower()\n",
+    "consumer.py": "from normalize import normalize\ndef user_key(name):\n    return \"user:\" + normalize(name)\n"
+  }
+}
