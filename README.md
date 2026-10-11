@@ -37,7 +37,7 @@ PYTHONPATH=src .venv/bin/python -m pr_review.cli analyze --input evaluation/inpu
 PYTHONPATH=src .venv/bin/python -m pr_review.cli publish --input evaluation/input.json --result outputs/result.json --dry-run --output outputs/payload.json
 ```
 
-For v2, `prepare --mode context` is the CLI default; `--mode diff` selects the paired baseline. Both bind model, PR metadata, snapshots and actual policy hashes. `analyze` accepts `--repository-path` for those immutable Git objects. `--recorded` validates authored responses offline; they cannot be published as live reviews. Every command accepts `--diagnostics-dir` (default `outputs/diagnostics`). See [evaluation commands](docs/v2-evaluation.md) for generated case repositories and the separately authorized runner.
+For v2, `prepare --mode context` is the CLI default; `--mode diff` selects the paired baseline. Both bind model, PR metadata, snapshots and actual policy hashes. `analyze` accepts `--repository-path` for those immutable Git objects. `--recorded` validates authored responses offline; they cannot be published as live reviews. `analyze --cache-only` (or workflow variable `CLAUDE_CACHE_ONLY=true`) fails on a cache miss before provider initialization; it permits zero-paid rerun verification. Every command accepts `--diagnostics-dir` (default `outputs/diagnostics`). See [evaluation commands](docs/v2-evaluation.md) for generated case repositories and the separately authorized runner.
 
 ## Boundaries
 

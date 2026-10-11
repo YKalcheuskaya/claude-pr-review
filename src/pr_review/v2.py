@@ -20,6 +20,10 @@ functional/security regression. A red severity gate enforces merge blocking only
 human has configured required branch protection. Low/medium do not block. Use partial
 with limitations when relevant context is missing. At most ten actionable findings.
 Findings may use a changed hunk anchor or null anchor for review-body publication.
+Use a null anchor when its file/range is not in the displayed diff hunk.
+Verify actual imports, calls or configuration links before claiming a dependency.
+Similar names/keys across independent implementations do not prove a dependency.
+Report each root cause once; affected callers are evidence, not duplicate findings.
 An anchor has file, side (LEFT/RIGHT), start, end. Each finding has severity, description,
 evidence, recommendation, anchor, references. Each reference has source_id, snapshot,
 path, blob, start_line, end_line. Final response must follow the JSON schema."""
@@ -121,9 +125,8 @@ def validate_result(result, data):
         if a is not None:
             if not isinstance(a, dict) or set(a) != {'file','side','start','end'} or a['side'] not in ('LEFT','RIGHT') or not path_ok(a['file']) or any(type(a[k]) is not int for k in ('start','end')) or not 1 <= a['start'] <= a['end'] <= a['start'] + 20:
                 raise ReviewError(f'findings.{i}.anchor: invalid')
-            ids = {locs.get(a['file'],{}).get(a['side'],{}).get(n) for n in range(a['start'],a['end']+1)}
-            if None in ids or len(ids) != 1:
-                raise ReviewError(f'findings.{i}.anchor: outside hunk')
+            # A well-formed unusable inline position is a body finding. Citations
+            # remain mandatory and are independently validated above.
         key = digest(f)
         if key in seen: raise ReviewError('findings.duplicate')
         seen.add(key)
@@ -163,7 +166,13 @@ def payload(data, result):
         for ref in f['references']:
             sha = data[{'before':'merge_base','after':'head','target':'base'}[ref['snapshot']]]
             text += f"\n[Source {safe_text(ref['source_id'])}](https://github.com/{data['repository']}/blob/{sha}/{quote(ref['path'],safe='/')}#L{ref['start_line']}-L{ref['end_line']})"
-        if f['anchor'] is None: body += '\n\n' + text
+        a = f['anchor']
+        inline = False
+        if a is not None:
+            positions=locations(data['diff']).get(a['file'],{}).get(a['side'],{})
+            hunk_ids={positions.get(n) for n in range(a['start'],a['end']+1)}
+            inline=None not in hunk_ids and len(hunk_ids)==1
+        if not inline: body += '\n\n' + text
         else:
             a = f['anchor']; c = dict(path=a['file'], side=a['side'], line=a['end'], body=text)
             if a['start'] != a['end']: c.update(start_line=a['start'],start_side=a['side'])
@@ -173,7 +182,7 @@ def payload(data, result):
     return dict(commit_id=data['head'],event='COMMENT',body=body,comments=comments)
 
 
-def analyze(data, github=None, recorded=None, client=None, repository_path='.', diagnostics=None):
+def analyze(data, github=None, recorded=None, client=None, repository_path='.', diagnostics=None, cache_only=False):
     from .context import ContextReader, TOOLS
     from .service import assert_current
     from .core import cached_result
@@ -187,7 +196,9 @@ def analyze(data, github=None, recorded=None, client=None, repository_path='.', 
         if old:
             event('cache.hit', origin_identity=old['identity'], origin_reviews=[dict(id=r.get('id'),url=r.get('html_url')) for r in reviews if '<!-- claude-pr-review:'+digest(data)+' -->' in (r.get('body') or '')], current_calls=0, current_cost=0)
             return old
-    event('cache.miss', reason='no matching v2 review')
+    event('cache.miss', reason='no matching v2 review',cache_only=cache_only)
+    if cache_only:
+        raise ReviewError('cache.miss: cache-only mode prohibits model calls')
     started = time.monotonic()
     reader = ContextReader(repository_path, data, diagnostics=diagnostics)
     sources = reader.initial_context() if data['mode'] == 'context' else []
