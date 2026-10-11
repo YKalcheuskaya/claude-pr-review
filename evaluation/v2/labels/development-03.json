@@ -1,0 +1,17 @@
+{
+  "case_id": "development-03",
+  "expected": [
+    {
+      "id": "regression-1",
+      "severity": "high",
+      "changed_path": "client.ts",
+      "related_paths": [
+        "routes.ts"
+      ],
+      "behavior": "The client now calls /api/item but the server still routes /api/items."
+    }
+  ],
+  "rationale": "The unchanged route establishes the endpoint mismatch.",
+  "provenance": "Synthetic seeded example; maintainer-defined oracle, not a real production incident.",
+  "review_status": "draft; human label review required before a paid pilot"
+}

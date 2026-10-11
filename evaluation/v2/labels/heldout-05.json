@@ -1,0 +1,17 @@
+{
+  "case_id": "heldout-05",
+  "expected": [
+    {
+      "id": "regression-1",
+      "severity": "high",
+      "changed_path": "user-repository.java",
+      "related_paths": [
+        "schema.sql"
+      ],
+      "behavior": "JdbcTemplate query references display_name, absent from users."
+    }
+  ],
+  "rationale": "The SQL contract is in an unchanged file.",
+  "provenance": "Synthetic seeded example; maintainer-defined oracle, not a real production incident.",
+  "review_status": "draft; human label review required before a paid pilot"
+}

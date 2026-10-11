@@ -1,0 +1,7 @@
+{
+  "case_id": "heldout-11",
+  "expected": [],
+  "rationale": "Equivalent URL construction preserves the route and encoding.",
+  "provenance": "Synthetic seeded example; maintainer-defined oracle, not a real production incident.",
+  "review_status": "draft; human label review required before a paid pilot"
+}

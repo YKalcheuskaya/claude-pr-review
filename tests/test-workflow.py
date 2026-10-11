@@ -16,7 +16,7 @@ class WorkflowBoundaries(unittest.TestCase):
         self.assertNotIn("pull_request_target", text)
         self.assertIn("cancel-in-progress: false", text)
         self.assertIn("if: always()", publisher)
-        self.assertIn("types: [opened, synchronize, reopened, ready_for_review]", text)
+        self.assertIn("types: [opened, synchronize, reopened, ready_for_review, edited]", text)
 
     def test_candidate_ci_has_no_provider_secret_and_collects_tests(self):
         text = (ROOT / ".github/workflows/verify.yml").read_text()

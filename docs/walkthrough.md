@@ -1,3 +1,20 @@
+# Version 2 offline walkthrough
+
+1. Run `python scripts/run-tests.py` without provider credentials. Distinguish deterministic mechanism verification from observed model quality.
+2. Run `python scripts/evaluate-v2.py prepare --split development --output outputs/walkthrough`. Inspect a generated input and its fixture repository: mode, title/body, fixed snapshots, diff and actual policy hashes are part of identity. Oracle labels are outside the model input.
+3. Inspect `ContextReader` and `tests/test-context.py`: explain Git object reads, before/after/target, a literal caller search, line limits, denied credentials and evidence IDs. Changing the worktree cannot change the fixed snapshot.
+4. Inspect `tests/test-v2.py`: the real installed SDK receives mocked tool_use, the immediate tool_result and a final request with no tools. Reconstruct the cited unchanged caller and changed hunk anchor.
+5. Explain why a clean partial review succeeds with INCOMPLETE REVIEW, and why malformed output, an invented citation or stale metadata fails. A citation does not prove the defect is real.
+6. Inspect a local diagnostic bundle under `outputs/diagnostics`: trace ID, snapshots, operation starts/ends/errors, requests/responses and context source IDs. Find the exact available response without rerunning the model. Missing end events indicate interruption, not a proven server failure.
+7. Explain cache reuse and ambiguous publication: identity includes PR metadata and actual policies; new execution data does not. One POST is followed by read-only reconciliation when uncertain.
+8. Read the v2 delivery package and pilot budget. Publication, workflow activation and live calls are separately authorized. A red check requires a protection rule to block merge.
+
+This checklist is preparation, not an observed independent assessment. Julia's uncoached explanation remains unverified.
+
+---
+
+## Historical v1 walkthrough
+
 # Explain the project
 
 Use these prompts to practice in English. Reading this guide is not an assessment.

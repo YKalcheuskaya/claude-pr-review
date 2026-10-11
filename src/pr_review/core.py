@@ -12,7 +12,15 @@ SHA = re.compile(r"[0-9a-f]{40}")
 
 
 class ReviewError(ValueError):
-    pass
+    """Safe application failure with machine-readable contract/stage metadata."""
+    def __init__(self, message, stage=None, code=None, validation_path=None, status_code=None, request_id=None):
+        super().__init__(message)
+        prefix = str(message).split(":", 1)[0]
+        self.code = code or (prefix if re.fullmatch(r"[a-z][a-z0-9_.-]{1,80}", prefix) else "review.failure")
+        self.stage = stage
+        self.validation_path = validation_path
+        self.status_code = status_code
+        self.request_id = request_id
 
 
 def digest(value):
@@ -97,6 +105,9 @@ def locations(diff):
 
 
 def validate_input(data):
+    if isinstance(data, dict) and data.get("version") == 2:
+        from .v2 import validate_input as v2_input
+        return v2_input(data)
     fields = {"version", "repository", "pr", "base", "head", "merge_base", "diff", "model", "config"}
     if not isinstance(data, dict) or set(data) != fields or data["version"] != 1:
         raise ReviewError("invalid input contract")
@@ -151,6 +162,9 @@ def validate_content(content, input_data):
 
 
 def validate_result(result, data):
+    if data.get("version") == 2:
+        from .v2 import validate_result as v2_result
+        return v2_result(result, data)
     if not isinstance(result, dict) or set(result) != {"version", "identity", "model", "duration_ms", "content", "usage", "live"} or result["version"] != 1 or result["identity"] != digest(data) or result["model"] != data["model"]:
         raise ReviewError("result does not match trusted input")
     if type(result["duration_ms"]) is not int or result["duration_ms"] < 0:
@@ -164,6 +178,9 @@ def validate_result(result, data):
 
 
 def gate(result):
+    if result.get("version") == 2:
+        from .v2 import gate as v2_gate
+        return v2_gate(result)
     return result["content"]["status"] == "complete" and not any(
         f["severity"] in ("high", "critical") for f in result["content"]["findings"])
 
@@ -173,6 +190,9 @@ def safe_text(text):
 
 
 def payload(data, result):
+    if data.get("version") == 2:
+        from .v2 import payload as v2_payload
+        return v2_payload(data, result)
     validate_result(result, data)
     marker = "<!-- claude-pr-review:" + digest(data) + " -->"
     saved = base64.b64encode(json.dumps(result, separators=(",", ":")).encode()).decode()

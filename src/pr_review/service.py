@@ -13,11 +13,18 @@ from .core import (CONFIG, DEFAULT_MODEL, ReviewError, cached_result, digest,
 
 
 class Github:
-    def __init__(self, repository, pr, token):
+    def __init__(self, repository, pr, token, diagnostics=None):
         self.root = f"https://api.github.com/repos/{repository}/pulls/{pr}"
         self.token = token
+        self.diagnostics = diagnostics
+        self.operations = 0
 
     def request(self, suffix="", body=None):
+        self.operations += 1
+        op = f'github-{self.operations:03d}'
+        if self.diagnostics:
+            self.diagnostics.event('github.start',operation_id=op,method='POST' if body is not None else 'GET',route='/pulls'+suffix)
+            self.diagnostics.request(op,dict(method='POST' if body is not None else 'GET',route='/pulls'+suffix,body=body))
         request = urllib.request.Request(self.root + suffix,
             data=json.dumps(body).encode() if body is not None else None,
             headers={"Authorization": "Bearer " + self.token,
@@ -27,12 +34,29 @@ class Github:
         try:
             with urllib.request.urlopen(request, timeout=30) as response:
                 raw = response.read(2 * 1024 * 1024 + 1)
+                status = response.status
+                request_id = response.headers.get("x-github-request-id")
+            if self.diagnostics:
+                self.diagnostics.response(op,raw.decode('utf-8',errors='replace'),status=status,request_id=request_id,truncated=len(raw)>2*1024*1024)
             if len(raw) > 2 * 1024 * 1024:
-                raise ReviewError("GitHub response exceeds bound")
-            return json.loads(raw)
+                raise ReviewError('github.response: exceeds bound')
+            try:
+                value = json.loads(raw)
+            except (ValueError,UnicodeError):
+                raise ReviewError('github.json: malformed response',status_code=status,request_id=request_id) from None
+            if self.diagnostics:
+                self.diagnostics.event('github.end',operation_id=op,status=status,request_id=request_id)
+            return value
+        except ReviewError as error:
+            if self.diagnostics: self.diagnostics.error(error,operation_id=op,error_code=error.code)
+            raise
         except urllib.error.HTTPError as error:
+            if self.diagnostics:
+                self.diagnostics.response(op,error.read(16384).decode('utf-8',errors='replace'),status=error.code)
+                self.diagnostics.error(error,operation_id=op,error_code='github.http')
             raise ReviewError(f"GitHub request failed (HTTP {error.code}); no write retry") from None
-        except (urllib.error.URLError, TimeoutError):
+        except (urllib.error.URLError, TimeoutError) as error:
+            if self.diagnostics: self.diagnostics.error(error,operation_id=op,error_code='github.uncertain')
             raise ReviewError("GitHub request outcome uncertain; no write retry") from None
 
     def pr(self):
@@ -62,19 +86,38 @@ def eligible(pr, repository):
 
 def assert_current(github, data):
     pr = github.pr()
+    if data.get("version") == 2 and {"title": pr.get("title") or "", "body": pr.get("body") or ""} != data["metadata"]:
+        raise ReviewError("PR metadata changed; rerun on current title/body")
     if not eligible(pr, data["repository"]) or pr["base"]["sha"] != data["base"] or pr["head"]["sha"] != data["head"]:
         raise ReviewError("PR eligibility or snapshot changed; rerun on current commits")
 
 
 def git(repository_path, *args):
+    """Bound stdout before decoding; never retain an arbitrarily large patch."""
+    from .core import MAX_BYTES
+    env = {k:v for k,v in os.environ.items() if not k.startswith('GIT_')}
+    env.update(GIT_NO_REPLACE_OBJECTS='1',GIT_CONFIG_NOSYSTEM='1',GIT_CONFIG_GLOBAL=os.devnull)
+    def timeout_handler(signum,frame): raise TimeoutError()
+    previous = signal.signal(signal.SIGALRM,timeout_handler)
     try:
-        return subprocess.run(["git", "-C", str(repository_path), *args],
-            check=True, capture_output=True, timeout=60).stdout.decode("utf-8")
-    except (subprocess.SubprocessError, UnicodeError):
-        raise ReviewError("Git snapshot collection failed or is not UTF-8") from None
+        signal.setitimer(signal.ITIMER_REAL,60)
+        with subprocess.Popen(['git','-C',str(repository_path),*args],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,env=env) as process:
+            try:
+                raw=process.stdout.read(MAX_BYTES+1)
+                if len(raw)>MAX_BYTES: raise ReviewError('snapshot.diff: output exceeds 60 KiB')
+                if process.wait(timeout=60): raise ReviewError('snapshot.git: collection failed')
+                return raw.decode('utf-8')
+            finally:
+                if process.poll() is None: process.kill()
+                process.wait(timeout=5)
+    except (subprocess.SubprocessError,UnicodeError,TimeoutError):
+        raise ReviewError('snapshot.git: collection failed or timed out') from None
+    finally:
+        signal.setitimer(signal.ITIMER_REAL,0)
+        signal.signal(signal.SIGALRM,previous)
 
 
-def prepare(github, repository, pr_number, repository_path, model=DEFAULT_MODEL):
+def prepare(github, repository, pr_number, repository_path, model=DEFAULT_MODEL, mode=None):
     pr = github.pr()
     if not eligible(pr, repository):
         raise ReviewError("PR is outside supported scope")
@@ -90,6 +133,10 @@ def prepare(github, repository, pr_number, repository_path, model=DEFAULT_MODEL)
     data = {"version": 1, "repository": repository, "pr": pr_number,
             "base": base, "head": head, "merge_base": merge_base, "diff": diff,
             "model": model, "config": CONFIG}
+    if mode is not None:
+        from .v2 import policies
+        changed_files = list(validate_input(data))
+        data.update(version=2, config="v2", mode=mode, metadata={"title": pr.get("title") or "", "body": pr.get("body") or ""}, policies=policies(), changed_files=changed_files)
     validate_input(data)
     assert_current(github, data)
     return data
@@ -121,7 +168,10 @@ justify these levels concretely. If context or output is insufficient, use parti
 and explain limitations. A clean complete review has no findings or limitations."""
 
 
-def analyze(data, github=None, recorded=None, client=None):
+def analyze(data, github=None, recorded=None, client=None, repository_path=".", diagnostics=None):
+    if data.get("version") == 2:
+        from .v2 import analyze as v2_analyze
+        return v2_analyze(data, github, recorded, client, repository_path, diagnostics)
     validate_input(data)
     if github:
         assert_current(github, data)
@@ -179,21 +229,29 @@ def analyze(data, github=None, recorded=None, client=None):
     return result
 
 
-def publish(data, result, github):
+def publish(data, result, github, repository_path=".", diagnostics=None):
     validate_result(result, data)
     if not result["live"] and data["diff"]:
         raise ReviewError("recorded results cannot be published to GitHub")
+    if data.get("version") == 2:
+        from .v2 import verify_sources
+        verify_sources(data, result, repository_path)
     assert_current(github, data)
     previous = cached_result(github.reviews(), data)
     if previous is not None:
+        if diagnostics: diagnostics.event("cache.hit", current_calls=0, current_cost=0, origin_identity=previous["identity"])
         if previous != result:
             raise ReviewError("published result conflicts with this artifact")
         return gate(previous)
     try:
-        github.post(payload(data, result))
+        if diagnostics: diagnostics.event("publication.start", method="POST", route="/pulls/reviews", commit=data["head"])
+        published = github.post(payload(data, result))
+        if diagnostics: diagnostics.event("publication.end", review_id=(published or {}).get("id"), review_url=(published or {}).get("html_url"), comments=len(result["content"]["findings"]))
     except ReviewError:
+        if diagnostics: diagnostics.event("reconciliation.start", writes=1)
         # Read after an uncertain write. Never blindly send a second POST.
         recovered = cached_result(github.reviews(), data)
+        if diagnostics: diagnostics.event("reconciliation.end", recovered=recovered == result)
         if recovered != result:
             raise ReviewError("publication uncertain or failed; inspect GitHub before retry") from None
     assert_current(github, data)

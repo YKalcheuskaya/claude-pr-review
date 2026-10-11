@@ -1,0 +1,15 @@
+{
+  "id": "heldout-12",
+  "split": "held-out",
+  "stack": "js-ts-react",
+  "title": "Update application behavior",
+  "body": "Review this change and its repository contracts.",
+  "before": {
+    "name.ts": "export const label = (name: string): string => name.trim();\n",
+    "name-card.tsx": "import { label } from \"./name\";\nexport function NameCard({name}: {name: string}) {\n  return <p>{label(name)}</p>;\n}\n"
+  },
+  "after": {
+    "name.ts": "export const label = (name: string): string => name.trim();\n",
+    "name-card.tsx": "import { label } from \"./name\";\nexport function NameCard({name}: {name: string}) {\n  return <span>{label(name)}</span>;\n}\n"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "heldout-05",
+  "split": "held-out",
+  "stack": "java-spring",
+  "title": "Update application behavior",
+  "body": "Review this change and its repository contracts.",
+  "before": {
+    "user-repository.java": "import org.springframework.jdbc.core.JdbcTemplate;\nclass userRepository {\n  JdbcTemplate db;\n  String name(long id) {\n    return db.queryForObject(\"SELECT name FROM users WHERE id = ?\", String.class, id);\n  }\n}\n",
+    "schema.sql": "CREATE TABLE users (id BIGINT PRIMARY KEY, name VARCHAR(100) NOT NULL);\n"
+  },
+  "after": {
+    "user-repository.java": "import org.springframework.jdbc.core.JdbcTemplate;\nclass userRepository {\n  JdbcTemplate db;\n  String name(long id) {\n    return db.queryForObject(\"SELECT display_name FROM users WHERE id = ?\", String.class, id);\n  }\n}\n",
+    "schema.sql": "CREATE TABLE users (id BIGINT PRIMARY KEY, name VARCHAR(100) NOT NULL);\n"
+  }
+}

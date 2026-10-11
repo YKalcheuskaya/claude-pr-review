@@ -1,0 +1,15 @@
+{
+  "id": "heldout-01",
+  "split": "held-out",
+  "stack": "python",
+  "title": "Update application behavior",
+  "body": "Review this change and its repository contracts.",
+  "before": {
+    "store.py": "import sqlite3\ndef save(db, name):\n    db.execute(\"INSERT INTO users (name) VALUES (?)\", (name,))\n",
+    "schema.sql": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\n"
+  },
+  "after": {
+    "store.py": "import sqlite3\ndef save(db, name):\n    db.execute(\"INSERT INTO users (display_name) VALUES (?)\", (name,))\n",
+    "schema.sql": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\n"
+  }
+}

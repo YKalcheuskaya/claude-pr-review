@@ -3,7 +3,7 @@ name: Claude PR review
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
 
 permissions: {}
 
@@ -50,7 +50,7 @@ jobs:
       - name: Prepare exact input
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python -m pr_review.cli prepare --event "$GITHUB_EVENT_PATH" --output outputs/input.json
+        run: python -m pr_review.cli prepare --event "$GITHUB_EVENT_PATH" --mode context --output outputs/input.json
       - name: Analyze or reuse existing review
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -63,6 +63,32 @@ jobs:
           path: outputs/*.json
           if-no-files-found: error
           retention-days: 7
+
+      - name: Finalize diagnostic summary
+        if: always()
+        env:
+          JOB_OUTCOME: ${{ job.status }}
+        run: |
+          if [ -f src/pr_review/cli.py ]; then
+            python -m pr_review.cli finalize-diagnostics --outcome "$JOB_OUTCOME"
+          else
+            echo 'Application trace unavailable: code/setup was not reached. Inspect platform logs and step status.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload diagnostics independently
+        id: diagnostic-upload
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: claude-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-analyze
+          path: outputs/diagnostics/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Report diagnostic upload failure
+        if: always() && steps.diagnostic-upload.outcome == 'failure'
+        run: |
+          echo '::warning::Diagnostic upload failed. Traceability is incomplete; inspect the original failing step.'
+          echo 'Diagnostic upload failed; full traceability unavailable.' >> "$GITHUB_STEP_SUMMARY"
 
   gate:
     name: Claude review gate
@@ -77,7 +103,7 @@ jobs:
       - name: Explain excluded PR
         if: needs.analyze.result == 'skipped'
         run: |
-          echo 'Skipped: draft, fork or bot PR; no Claude call. This is outside v1 coverage.'
+          echo 'Skipped: draft, fork or bot PR; no Claude call. This is outside v2 coverage.'
       - name: Fail when analysis did not complete
         if: needs.analyze.result != 'success' && needs.analyze.result != 'skipped'
         run: |
@@ -113,3 +139,29 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python -m pr_review.cli publish --event "$GITHUB_EVENT_PATH" --input outputs/input.json --result outputs/result.json
+
+      - name: Finalize diagnostic summary
+        if: always()
+        env:
+          JOB_OUTCOME: ${{ job.status }}
+        run: |
+          if [ -f src/pr_review/cli.py ]; then
+            python -m pr_review.cli finalize-diagnostics --outcome "$JOB_OUTCOME"
+          else
+            echo 'Application trace unavailable: code/setup was not reached. Inspect platform logs and step status.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload diagnostics independently
+        id: diagnostic-upload
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: claude-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}-gate
+          path: outputs/diagnostics/
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Report diagnostic upload failure
+        if: always() && steps.diagnostic-upload.outcome == 'failure'
+        run: |
+          echo '::warning::Diagnostic upload failed. Traceability is incomplete; inspect the original failing step.'
+          echo 'Diagnostic upload failed; full traceability unavailable.' >> "$GITHUB_STEP_SUMMARY"

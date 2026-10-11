@@ -1,0 +1,7 @@
+{
+  "case_id": "heldout-08",
+  "expected": [],
+  "rationale": "A numeric configuration change preserves the required key and value type.",
+  "provenance": "Synthetic seeded example; maintainer-defined oracle, not a real production incident.",
+  "review_status": "draft; human label review required before a paid pilot"
+}

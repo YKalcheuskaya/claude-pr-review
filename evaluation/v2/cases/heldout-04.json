@@ -1,0 +1,15 @@
+{
+  "id": "heldout-04",
+  "split": "held-out",
+  "stack": "python",
+  "title": "Update application behavior",
+  "body": "Review this change and its repository contracts.",
+  "before": {
+    "query.py": "def find(db, name):\n    return db.execute(\"SELECT id FROM users WHERE name = ?\", (name,)).fetchone()\n",
+    "schema.sql": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\n"
+  },
+  "after": {
+    "query.py": "def find(db, name):\n    sql = \"SELECT id FROM users WHERE name = ?\"\n    return db.execute(sql, (name,)).fetchone()\n",
+    "schema.sql": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\n"
+  }
+}

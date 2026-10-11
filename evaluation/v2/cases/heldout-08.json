@@ -1,0 +1,15 @@
+{
+  "id": "heldout-08",
+  "split": "held-out",
+  "stack": "java-spring",
+  "title": "Update application behavior",
+  "body": "Review this change and its repository contracts.",
+  "before": {
+    "limits.java": "import org.springframework.beans.factory.annotation.Value;\nclass limits {\n  @Value(\"${app.limit:20}\") int limit;\n}\n",
+    "application.properties": "app.limit=20\n"
+  },
+  "after": {
+    "limits.java": "import org.springframework.beans.factory.annotation.Value;\nclass limits {\n  @Value(\"${app.limit:20}\") int limit;\n}\n",
+    "application.properties": "app.limit=25\n"
+  }
+}

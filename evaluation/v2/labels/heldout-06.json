@@ -1,0 +1,17 @@
+{
+  "case_id": "heldout-06",
+  "expected": [
+    {
+      "id": "regression-1",
+      "severity": "high",
+      "changed_path": "application.properties",
+      "related_paths": [
+        "pricing-service.java"
+      ],
+      "behavior": "Renaming the property leaves the required pricing.tax-rate placeholder unresolved; service startup fails."
+    }
+  ],
+  "rationale": "The consuming @Value placeholder has no default.",
+  "provenance": "Synthetic seeded example; maintainer-defined oracle, not a real production incident.",
+  "review_status": "draft; human label review required before a paid pilot"
+}

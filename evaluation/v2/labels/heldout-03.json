@@ -1,0 +1,7 @@
+{
+  "case_id": "heldout-03",
+  "expected": [],
+  "rationale": "Equivalent transformation preserves the caller contract.",
+  "provenance": "Synthetic seeded example; maintainer-defined oracle, not a real production incident.",
+  "review_status": "draft; human label review required before a paid pilot"
+}

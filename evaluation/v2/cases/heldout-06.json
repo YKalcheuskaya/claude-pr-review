@@ -1,0 +1,15 @@
+{
+  "id": "heldout-06",
+  "split": "held-out",
+  "stack": "java-spring",
+  "title": "Update application behavior",
+  "body": "Review this change and its repository contracts.",
+  "before": {
+    "pricing-service.java": "import org.springframework.beans.factory.annotation.Value;\nimport org.springframework.stereotype.Service;\n@Service\nclass pricingService {\n  @Value(\"${pricing.tax-rate}\")\n  double rate;\n  double total(double amount) { return amount * (1 + rate); }\n}\n",
+    "application.properties": "pricing.tax-rate=0.08\n"
+  },
+  "after": {
+    "pricing-service.java": "import org.springframework.beans.factory.annotation.Value;\nimport org.springframework.stereotype.Service;\n@Service\nclass pricingService {\n  @Value(\"${pricing.tax-rate}\")\n  double rate;\n  double total(double amount) { return amount * (1 + rate); }\n}\n",
+    "application.properties": "pricing.tax-percent=8\n"
+  }
+}

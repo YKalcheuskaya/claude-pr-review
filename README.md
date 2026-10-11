@@ -1,151 +1,64 @@
 # Claude PR Review
 
-A focused GitHub Actions integration: open a pull request or push a new commit,
-receive Claude findings on diff lines, and fail a check for high/critical findings.
-Blocking merge additionally requires a configured GitHub branch-protection rule.
+A bounded GitHub PR reviewer that explores related code through read-only Git tools, publishes evidence-linked findings, and fails a check for high/critical defects. Merge blocking requires an independently configured required branch-protection rule.
 
-**Status — October 5, 2026:** published to the private
-[GitHub repository](https://github.com/YKalcheuskaya/claude-pr-review). The
-[first Verify run](https://github.com/YKalcheuskaya/claude-pr-review/actions/runs/37246943855)
-passed on Python 3.10 and 3.12. Live Haiku reviews now demonstrate a clean PR,
-a real inline finding on the seeded retry defect and a failed severity gate.
-The clean rerun reused the same result without adding another review.
-See [the live experiment](docs/live-verification-2026-10-05.md) for the complete
-observed results and limitations. Branch-protection enforcement is unavailable
-on the current private-repository plan; a failed check does not yet prohibit merging.
-Authored replay responses demonstrate software behavior, not model quality.
-The implementation was developed with AI assistance; Julia's independent explanation
-is a separate evidence gate.
+**October 10, 2026 — v2 local implementation.** Context tools, structured contracts, publication/cache validation, diagnostics, offline evaluation and authorization-gated pilot execution are implemented locally. The paid workflow remains paused remotely. Version 2 has not been published or tested against the live provider/GitHub; improved review quality is unverified. AI-assisted implementation and Julia's independent explanation are separate evidence dimensions.
+
+The private repository's historical v1 demonstration remains at `a89a22a39372f1cfc8f40448fa572be63fd7862e`: three Haiku reviews demonstrated clean/defect/fix, an inline finding, severity gating and duplicate-free reuse. Severity was over-calibrated; private merge-protection configuration returned HTTP 403. See the unchanged [v1 evidence](docs/live-verification-2026-10-05.md). These results do not establish v2 quality or enforcement.
 
 ```mermaid
 flowchart LR
-  PR[PR opened or updated] --> A[Analyze: read permissions]
-  A --> C[Claude: one bounded API call]
-  C --> V[Validate findings and locations]
-  V --> R[Same-run JSON artifact]
-  R --> P[Publisher: PR write permission]
-  P --> I[Inline comments at reviewed commit]
-  P --> G[Required severity gate]
+  PR[PR event and fixed Git snapshots] --> A[Prepare: metadata and policy hashes]
+  A --> T[Explore: bounded Git tools]
+  T --> M[Final structured review without tools]
+  M --> V[Validate evidence and coverage]
+  V --> R[Required result artifact]
+  R --> P[Trusted publisher: recheck Git and freshness]
+  P --> G[COMMENT review and severity gate]
+  A --> D[Independent sanitized diagnostic artifact]
+  T --> D
+  P --> D
 ```
 
-## Run locally
+## Local verification
 
-The Python package is `pr_review`; the executable and project name remain
-`claude-pr-review`.
-
-Python 3.10+ on macOS/Linux. The live CLI uses a POSIX wall-clock timer and runs
-in the main thread; GitHub uses Ubuntu and Python 3.12.
-
-```bash
+```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-lock.txt
 .venv/bin/python scripts/run-tests.py
 ```
 
-The test runner explicitly loads kebab-case filenames and fails on zero tests.
-Without installed SDK dependencies, SDK tests skip; the verified local release
-uses the locked environment with no skips.
+Verify remains credential-free on Python 3.10/3.12. The installed official SDK is exercised with mock HTTP transport, including token counting, tool-use messages, final JSON, and errors. No model call is needed to run the tests.
 
-Replay a known defect and generate the exact publication payload:
+The historical offline example remains usable:
 
-```bash
-PYTHONPATH=src .venv/bin/python -m pr_review.cli analyze \
-  --input evaluation/input.json --recorded evaluation/defect-response.json \
-  --output outputs/defect-result.json
-PYTHONPATH=src .venv/bin/python -m pr_review.cli publish \
-  --input evaluation/input.json --result outputs/defect-result.json \
-  --dry-run --output outputs/defect-payload.json
+```sh
+PYTHONPATH=src .venv/bin/python -m pr_review.cli analyze --input evaluation/input.json --recorded evaluation/clean-response.json --output outputs/result.json
+PYTHONPATH=src .venv/bin/python -m pr_review.cli publish --input evaluation/input.json --result outputs/result.json --dry-run --output outputs/payload.json
 ```
 
-The second command intentionally exits **1**: the authored high-severity finding
-blocks the gate. Repeat with `evaluation/clean-response.json` and new output names
-to obtain exit **0**. A recorded result cannot be sent to GitHub.
+For v2, `prepare --mode context` is the CLI default; `--mode diff` selects the paired baseline. Both bind model, PR metadata, snapshots and actual policy hashes. `analyze` accepts `--repository-path` for those immutable Git objects. `--recorded` validates authored responses offline; they cannot be published as live reviews. Every command accepts `--diagnostics-dir` (default `outputs/diagnostics`). See [evaluation commands](docs/v2-evaluation.md) for generated case repositories and the separately authorized runner.
 
-CLI: `prepare` collects a real PR snapshot from GitHub and a local Git object
-database; `analyze` calls Claude or replays an authored response; `publish`
-revalidates the snapshot, posts a review, and returns the gate verdict. Live
-publication requires `--event "$GITHUB_EVENT_PATH"`; `--dry-run --output ...`
-never sends a request. Exit 2 denotes invalid input, unavailable/incomplete review,
-stale snapshot, missing configuration or publication failure.
+## Boundaries
 
-## GitHub setup
+- Analysis has repository/PR read permissions and the Anthropic secret. Publication has PR write permission and no provider credential. Both execute base-commit scripts; PR code is data. Separate Verify executes candidate tests without provider secrets.
+- Events: opened, synchronize, reopened, ready_for_review and edited. Draft, fork, bot and non-main PRs have no review coverage. Contributors editing same-repository workflows must be trusted; this is not a hostile-contributor sandbox.
+- Snapshots: `before` is merge base, `after` is PR head, `target` is base tip. Integration compatibility with current main belongs to Verify.
+- Limits: 20 changed files, 60 KiB supported diff, four exploration calls and one final call, twelve tool operations, 24,000 input tokens, 2,000 exploration/4,000 final output tokens, 60 seconds/call, five minutes/analysis, zero SDK retries. Input admission additionally uses a conservative UTF-8 byte bound, so a PR below the diff limit can still exceed the request budget.
+- Tools list permitted tracked files, perform literal text searches and read bounded line ranges. They do not execute code or provide a static dependency graph. Credentials, environment files, private keys, symlinks, submodules and generated/vendor/build content are excluded. Missing/denied/truncated context remains an application limitation.
+- High/critical findings fail; valid complete or incomplete reviews without them succeed. Incomplete results prominently say **INCOMPLETE REVIEW** and emit a warning. Invalid final output/evidence, provider errors, stale snapshots or publication failure fail. Success with warning does not mean full coverage.
+- Inline anchors must be in a displayed hunk. Related code is linked to immutable commits; findings without valid inline positions use the review body. Publication checks citation IDs, ranges, blob IDs and source hashes against Git.
+- Cache identity includes snapshots, title/body, mode, model and actual policies. Execution timestamps/trace IDs are excluded. V1 cannot satisfy v2. The hidden cache record is at most 32 KiB and contains findings plus cited source metadata; full transcripts are diagnostic artifacts. A cache hit makes zero new paid calls and reports original usage separately.
+- Publication performs one POST. An uncertain outcome triggers read-only reconciliation and never another POST in that invocation. A push/edit during publication can leave an old-commit review, but freshness checks fail the gate. No PR approval, merge or application submission is automated.
+- Traces sanitize secrets before console/files/summary, omit authorization headers, hidden reasoning and raw SDK objects, and cap each job bundle at 10 MiB. Full available requests/responses belong in artifacts, not console. Retention is seven days. Redaction/truncation/interruption/upload failure prevents a completeness claim; hard runner loss is best effort.
+- The pilot reserves at most $4 of a $5 ceiling across development, paired held-out runs and private smoke reviews. Failed/unknown calls retain their reservation. The final $1, publication and workflow activation require separate permission. Account-wide invoices are outside this application's guarantee.
 
-Follow [the delivery package](docs/github-delivery.md) for the authorized private
-publication and the bounded live experiment. Publish the complete
-source to `main` first so both review jobs
-can check out the scripts from the trusted base commit.
+## Guides and evidence
 
-1. Set repository secret `ANTHROPIC_API_KEY` through GitHub Settings. Never put the
-   key in a command argument, repository file or PR. The runtime uses the default
-   `GITHUB_TOKEN`; no personal GitHub token is required by the application.
-2. Set repository variable `CLAUDE_MODEL` to an explicitly verified, available
-   model ID. The initial candidate is `claude-haiku-4-5-20251001`; no fallback is
-   allowed. Confirm availability immediately before the authorized demonstration.
-3. Enable Actions. Scoped `pull-requests: write` in the publisher is sufficient
-   for the demonstrated `COMMENT` review. The repository's “Allow GitHub Actions
-   to create and approve pull requests” setting stayed disabled; this project
-   does not require automatic approval. No code-writing job exists.
-4. After the checks have run, create an active rule for `main` requiring pull
-   requests, **Claude review gate**, and the two Verify test checks. Require the
-   branch to be up to date. Remove bypass actors for the demonstration and test
-   as the actual maintainer. A red check alone does not prohibit merging.
+- [Architecture and contracts](docs/v2-architecture.md)
+- [Troubleshooting and traces](docs/v2-troubleshooting.md)
+- [Evaluation and authorized pilot runner](docs/v2-evaluation.md)
+- [Offline walkthrough](docs/walkthrough.md)
+- [V2 local acceptance and delivery package](docs/v2-delivery.md)
 
-Review runs on `opened`, `synchronize`, `reopened`, and `ready_for_review` PR events
-to `main`. Forks, draft PRs and bot-authored PRs are explicitly outside v1 review
-coverage; their gate is skipped with an explanatory successful job. They do not
-receive a model call. Push without a PR runs ordinary verification only.
-
-## Contracts and boundaries
-
-- Analyze has `contents: read`, `pull-requests: read` and the Anthropic secret.
-  Publisher has `contents: read`, `pull-requests: write` and no Anthropic secret.
-- Both jobs execute base-commit scripts and use PR head objects only as data. The
-  separate Verify workflow executes candidate tests without provider credentials.
-- Same-repository contributors must be trusted to edit workflows. `pull_request`
-  workflows themselves can be changed in a PR; checking out base scripts does not
-  turn this into a sandbox for hostile collaborators. Fork support is excluded.
-- The diff uses Git's merge base, not a direct comparison against the base tip.
-  Textual changes support old/new diff sides and edited renames. Binary, symlink,
-  executable-mode, metadata-only rename and quoted-path changes fail explicitly.
-- Limits: 20 files, 60 KiB diff, 10 findings, 4,000 output tokens, one 60-second
-  model call, zero SDK retries. Size rejection or partial output is never green.
-  No automatic retry or silent model substitution exists. Each new snapshot or
-  explicit retry after a failed call can incur another charge. Console limits,
-  not this application, control total account spending across workflow runs.
-- Review severity `high`/`critical` fails the required gate. `low`/`medium` do not.
-  Claude uses `COMMENT`, not `APPROVE` or `REQUEST_CHANGES`. False positives can
-  block a PR; a human must inspect the finding. AI findings do not replace tests.
-- Per-PR workflow concurrency is serialized. A digest covers repository, PR,
-  base/head/merge-base, diff, model and config version. A bot-authored review stores
-  its result in a hidden body record; reruns reuse it before calling Claude.
-  Bump `CONFIG` whenever prompt/schema/limits or decision policy change.
-- Snapshot checks run before the model call and before/after publication. GitHub
-  cannot atomically compare PR head and post a review: a push during that small
-  window can produce a review on an older commit, but the gate fails and the
-  review always names that commit. New commits receive a new review.
-- An ambiguous POST triggers a read-only reconciliation, never another POST in
-  that invocation. Submitted matching results are reused; pending/inconsistent
-  states require inspection. Deleted bot reviews remove the durable cache.
-- Source diffs go to Anthropic; JSON artifacts retain source and findings for seven
-  days on GitHub. Only nonsensitive demo code belongs in this repository.
-
-## Evidence and explanation
-
-See [local verification](docs/local-verification.md), [delivery and live scenarios](docs/github-delivery.md),
-and [the walkthrough](docs/walkthrough.md). Actual PR/run URLs and retained
-responses are in [the live verification report](docs/live-verification-2026-10-05.md).
-These few controlled cases do not establish general review accuracy; the model
-overstated the seeded defect's severity. The earlier AI Pipeline's results are
-not evidence of this project's live behavior.
-
-## Technical sources
-
-Checked October 3, 2026: [GitHub review API](https://docs.github.com/en/rest/pulls/reviews),
-[PR events](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows),
-[secure Actions use](https://docs.github.com/en/actions/reference/security/secure-use),
-[Claude structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs),
-[models](https://platform.claude.com/docs/en/models/overview),
-and [SDK 1.11.0](https://pypi.org/project/anthropic/1.11.0/).
-The SDK was also exercised locally through an in-memory HTTP transport without
-a credential or network call. Direct and transitive runtime dependencies are
-version-pinned in `requirements-lock.txt`; artifact hashes are not pinned.
+Technical references checked October 10, 2026: [Anthropic client tools](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls), [structured output](https://platform.claude.com/docs/en/build-with-claude/structured-outputs), [pricing](https://platform.claude.com/docs/en/about-claude/pricing), [GitHub reviews](https://docs.github.com/en/rest/pulls/reviews), and [workflow commands](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands). First-party Haiku 4.5 rates currently list $1 input/$5 output per million tokens; availability/pricing must be rechecked immediately before separately authorized live work. No Sonnet comparison or model substitution is included.

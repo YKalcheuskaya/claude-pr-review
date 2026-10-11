@@ -1,0 +1,15 @@
+{
+  "id": "development-03",
+  "split": "development",
+  "stack": "js-ts-react",
+  "title": "Update application behavior",
+  "body": "Review this change and its repository contracts.",
+  "before": {
+    "client.ts": "export function url(id: string) { return `/api/items/${encodeURIComponent(id)}`; }\n",
+    "routes.ts": "export const itemRoute = \"/api/items/:id\";\n"
+  },
+  "after": {
+    "client.ts": "export function url(id: string) { return `/api/item/${encodeURIComponent(id)}`; }\n",
+    "routes.ts": "export const itemRoute = \"/api/items/:id\";\n"
+  }
+}

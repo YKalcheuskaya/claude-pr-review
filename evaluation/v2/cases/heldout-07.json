@@ -1,0 +1,15 @@
+{
+  "id": "heldout-07",
+  "split": "held-out",
+  "stack": "java-spring",
+  "title": "Update application behavior",
+  "body": "Review this change and its repository contracts.",
+  "before": {
+    "item-controller.java": "import org.springframework.web.bind.annotation.*;\n@RestController\nclass itemController {\n  @GetMapping(\"/items/{id}\")\n  String get(@PathVariable(\"id\") String id) { return id; }\n}\n",
+    "client.js": "export const itemUrl = id => `/items/${encodeURIComponent(id)}`;\n"
+  },
+  "after": {
+    "item-controller.java": "import org.springframework.web.bind.annotation.*;\n@RestController\nclass itemController {\n  @GetMapping(\"/items/{id}\")\n  String get(@PathVariable(\"id\") String itemId) { return itemId; }\n}\n",
+    "client.js": "export const itemUrl = id => `/items/${encodeURIComponent(id)}`;\n"
+  }
+}

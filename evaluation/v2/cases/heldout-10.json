@@ -1,0 +1,15 @@
+{
+  "id": "heldout-10",
+  "split": "held-out",
+  "stack": "js-ts-react",
+  "title": "Update application behavior",
+  "body": "Review this change and its repository contracts.",
+  "before": {
+    "db.js": "export function add(db, name) {\n  return db.prepare(\"INSERT INTO users (name) VALUES (?)\").run(name);\n}\n",
+    "schema.sql": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\n"
+  },
+  "after": {
+    "db.js": "export function add(db, name) {\n  return db.prepare(\"INSERT INTO users (display_name) VALUES (?)\").run(name);\n}\n",
+    "schema.sql": "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL);\n"
+  }
+}
