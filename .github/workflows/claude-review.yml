@@ -55,6 +55,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CACHE_ONLY: ${{ vars.CLAUDE_CACHE_ONLY || 'false' }}
         run: python -m pr_review.cli analyze --input outputs/input.json --output outputs/result.json
       - name: Transfer validated result
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

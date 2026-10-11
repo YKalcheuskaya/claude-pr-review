@@ -168,10 +168,11 @@ justify these levels concretely. If context or output is insufficient, use parti
 and explain limitations. A clean complete review has no findings or limitations."""
 
 
-def analyze(data, github=None, recorded=None, client=None, repository_path=".", diagnostics=None):
+def analyze(data, github=None, recorded=None, client=None, repository_path=".", diagnostics=None, cache_only=False):
     if data.get("version") == 2:
         from .v2 import analyze as v2_analyze
-        return v2_analyze(data, github, recorded, client, repository_path, diagnostics)
+        return v2_analyze(data, github, recorded, client, repository_path, diagnostics, cache_only)
+    if cache_only: raise ReviewError("cache.mode: cache-only requires v2")
     validate_input(data)
     if github:
         assert_current(github, data)

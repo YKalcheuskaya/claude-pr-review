@@ -176,6 +176,24 @@ class V2(unittest.TestCase):
             with self.assertRaises(ReviewError):analyze(self.data,client=client,repository_path=self.root,diagnostics=diag)
             manifest=diag.finalize('failure')
         self.assertNotIn('count-01',manifest.get('open_operations',{}));self.assertEqual(calls,[])
+    def test_unusable_anchor_falls_back_to_body_with_verified_sources(self):
+        result=self.result();f,source=self.finding()
+        f['anchor']=dict(file='caller.py',side='RIGHT',start=2,end=2)
+        result['sources']=[source_metadata(source)];result['content']['findings']=[f];result['gate_outcome']='failure'
+        validate_result(result,self.data);verify_sources(self.data,result,self.root)
+        body=payload(self.data,result)
+        self.assertEqual(body['comments'],[]);self.assertIn('Contract rename breaks',body['body'])
+        result['content']['findings'][0]['references'][0]['blob']='0'*40
+        with self.assertRaises(ReviewError):validate_result(result,self.data)
+    def test_cache_only_hit_reuses_and_miss_never_initializes_sdk(self):
+        client,calls=self.mock_client()
+        with patch('anthropic.Anthropic') as sdk:
+            with self.assertRaises(ReviewError):analyze(self.data,github=self.github,repository_path=self.root,cache_only=True)
+            sdk.assert_not_called()
+        self.assertEqual(calls,[])
+        result=self.live();publish(self.data,result,self.github,repository_path=self.root)
+        self.assertEqual(analyze(self.data,github=self.github,client=client,repository_path=self.root,cache_only=True),result)
+        self.assertEqual(calls,[])
     def test_five_call_and_twelve_operation_limits_are_explicit(self):
         calls=[]
         def create(**kwargs):
