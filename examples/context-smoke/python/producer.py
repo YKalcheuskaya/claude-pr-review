@@ -3,4 +3,4 @@
 
 def invoice_summary(subtotal, tax):
     total = subtotal + tax
-    return {"total": total}
+    return {"amount": total}
