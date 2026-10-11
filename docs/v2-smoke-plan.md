@@ -29,3 +29,11 @@ After corrected review, rerun identical SHA/title/body/policies. Expect zero new
 Inspect failure artifacts without a paid rerun. Disable the workflow after the bounded experiment (also on failure), and verify disabled state and private visibility. Leave new demo PRs unmerged unless Julia separately authorizes their cleanup/merge. Keep exact run/review URLs, snapshots, sanitized application artifacts, actual outcomes and estimated model usage in a durable report. Do not classify three examples as a completed twelve-case held-out quality comparison or as independent interview evidence.
 
 Sources checked October 10, 2026: [Anthropic pricing](https://platform.claude.com/docs/en/about-claude/pricing), [model overview](https://platform.claude.com/docs/en/models/overview). Private merge enforcement remains unverified and outside this package.
+
+## Live discovery and bounded repair
+
+The first defect run (`38101780126`) used three model calls but failed validation because the model anchored a finding on an unchanged consumer. Its final output found the real Python defect, duplicated it and also made an unsupported high-severity inference about the separate JavaScript implementation. No review was published. This is retained as mixed model-quality and failed-mechanism evidence, not three true detections.
+
+The repair keeps anchor shape and citation validation strict, but routes a well-formed anchor outside a changed hunk to the review body as required by the original v2 plan. Prompt clarification asks for verified dependency links and one finding per root cause. These changes do not establish improved model quality until observed.
+
+The first failed envelope remains reserved. Reallocate the original cache envelope to a single defect retry: failed attempt + retry + corrected + clean = four $0.20 envelopes, $0.80 total. Cache verification uses `CLAUDE_CACHE_ONLY=true`, a fail-closed guard before provider creation, and reserves zero paid calls. A miss fails without a model request. Any further paid retry exceeds this package and requires a new budget decision. Keep workflow disabled during repair/release and re-enable only for the next serial reserved snapshot.

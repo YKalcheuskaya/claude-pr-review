@@ -38,6 +38,7 @@ def main(argv=None):
     a = commands.add_parser("analyze")
     a.add_argument("--input", required=True)
     a.add_argument("--recorded")
+    a.add_argument("--cache-only", action="store_true")
     a.add_argument("--output", required=True)
     a.add_argument("--repository-path", default=".")
     a.add_argument("--mode", choices=("context", "diff"))
@@ -82,7 +83,7 @@ def main(argv=None):
                 raise ReviewError("input.mode: mode differs from prepared identity")
             if args.command == "analyze":
                 result = analyze(data, recorded=read(args.recorded) if args.recorded else None,
-                                 github=None if args.recorded else api(data, diagnostics), repository_path=args.repository_path, diagnostics=diagnostics)
+                                 github=None if args.recorded else api(data, diagnostics), repository_path=args.repository_path, diagnostics=diagnostics, cache_only=args.cache_only or os.environ.get("CLAUDE_CACHE_ONLY") == "true")
                 write(args.output, result)
             else:
                 result = read(args.result)
