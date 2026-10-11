@@ -55,6 +55,7 @@ For v2, `prepare --mode context` is the CLI default; `--mode diff` selects the p
 
 ## Guides and evidence
 
+- [Development history: v1, contextual v2 and the live-discovered repair](docs/development-history.md)
 - [Architecture and contracts](docs/v2-architecture.md)
 - [Troubleshooting and traces](docs/v2-troubleshooting.md)
 - [Evaluation and authorized pilot runner](docs/v2-evaluation.md)

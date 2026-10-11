@@ -52,3 +52,7 @@ Model: `claude-haiku-4-5-20251001`. Estimates use $1 input/$5 output per million
 Sanitized downloaded inputs, results, final requests, tool traces, manifests, authorization, shared budget and run index are retained privately in the parent workspace's ignored `resources/claude-pr-review-v2-smoke-2026-10-10/`. The tracked report retains durable conclusions; GitHub's short-lived artifact retention is not the only evidence copy. No credentials are included.
 
 Final repository/workflow state verified: private; paid Claude review workflow `disabled_manually`; Verify `active`; demo PRs [4](https://github.com/YKalcheuskaya/claude-pr-review/pull/4) and [6](https://github.com/YKalcheuskaya/claude-pr-review/pull/6) open and unmerged. The cache-only variable was restored to false after its guarded test. No ongoing paid execution is enabled. Private merge enforcement remains unverified; a red severity check is not proof that GitHub blocks merging.
+
+## Subsequent branch cleanup — October 11, 2026
+
+After the experiment, Julia authorized removing the unused branches. PRs 4 and 6 were closed without merge, and all six release/repair and demonstration branches were deleted locally and on GitHub. Only main remains; its existing commits and the review evidence were preserved. The repository remains private, Claude PR review remains disabled, and Verify remains active. See the [development history](development-history.md) for the milestone map and rationale.
