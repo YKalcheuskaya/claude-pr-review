@@ -1,13 +1,14 @@
-"""Version two contracts and bounded context review. V1 evidence stays readable."""
+"""Structured review contracts and bounded context orchestration."""
 import copy
 import json
 import os
-import signal
+import re
 import time
 from urllib.parse import quote
 
 from .core import DEFAULT_MODEL, ReviewError, digest, locations, path_ok, safe_text
 from .config import review_budget, review_controls
+from .runtime import bounded, deadline, transient, backoff, MAX_ATTEMPTS, TIMERS
 from decimal import Decimal
 
 def system_prompt():
@@ -41,20 +42,18 @@ def policies(model=DEFAULT_MODEL):
     return dict(prompt=digest(system_prompt()), schema=digest(schema()), tools=digest(TOOLS),
                 reader=digest([POLICY, Path(__file__).with_name('context.py').read_text()]),
                 limits=digest([review_controls(), review_budget(model)]),
-                implementation=digest([Path(__file__).read_text(), Path(__file__).with_name('config.py').read_text()]))
+                implementation=digest({p.name: p.read_text() for p in sorted(Path(__file__).parent.glob('*.py'))}))
 
 
 def validate_input(data):
-    from .core import validate_input as legacy, CONFIG
-    extra = {"mode", "metadata", "policies", "changed_files"}
-    base = {k: v for k, v in data.items() if k not in extra}
-    base.update(version=1, config=CONFIG)
-    locs = legacy(base)
-    if (set(data) != set(base) | extra
-            or data['version'] != 2
-            or data['config'] != 'v2'
+    from .core import validate_snapshot_fields
+    fields = {'version','repository','pr','base','head','merge_base','diff','model',
+              'config','mode','metadata','policies','changed_files'}
+    if (not isinstance(data, dict) or set(data) != fields
+            or type(data['version']) is not int or data['version'] != 2 or data['config'] != 'review'
             or data['mode'] not in ('diff', 'context')):
-        raise ReviewError('input.contract: invalid v2 fields')
+        raise ReviewError('input.contract: invalid review fields')
+    locs = validate_snapshot_fields(data)
     if data['policies'] != policies(data['model']) or data['changed_files'] != list(locs):
         raise ReviewError('input.policy: policy or changes mismatch')
     meta = data['metadata']
@@ -77,7 +76,7 @@ def validate_result(result, data):
     required = {'version','identity','model','duration_ms','content','usage','live','sources','calls','coverage','gate_outcome'}
     if (not isinstance(result, dict)
             or set(result) != required
-            or result['version'] != 2
+            or type(result['version']) is not int or result['version'] != 2
             or result['identity'] != digest(data)
             or result['model'] != data['model']):
         raise ReviewError('result.identity: mismatch')
@@ -85,8 +84,12 @@ def validate_result(result, data):
         raise ReviewError('result.provenance: invalid')
     if type(result['calls']) is not int or not 0 <= result['calls'] <= (review_controls()['research_calls'] + 1 if data['mode'] == 'context' else 1):
         raise ReviewError('result.calls: invalid')
+    if result['live'] != bool(result['calls']):
+        raise ReviewError('result.provenance: calls and live status disagree')
     if not isinstance(result['usage'], dict) or set(result['usage']) != {'input_tokens','output_tokens'} or any(type(v) is not int or v < 0 for v in result['usage'].values()):
         raise ReviewError('result.usage: invalid')
+    if not result['live'] and any(result['usage'].values()):
+        raise ReviewError('result.provenance: offline result cannot report provider usage')
     content = result['content']
     if (not isinstance(content, dict)
             or set(content) != {'status','summary','findings','limitations'}
@@ -104,11 +107,11 @@ def validate_result(result, data):
     for s in sources:
         if not isinstance(s, dict) or set(s) != {'source_id','snapshot','path','blob','start_line','end_line','text_hash'}:
             raise ReviewError('sources.fields: invalid')
-        if s['source_id'] in indexed or s['snapshot'] not in ('before','after','target') or not path_ok(s['path']):
+        if (not isinstance(s['source_id'], str) or not re.fullmatch(r'source-[0-9a-f]{24}', s['source_id'])
+                or s['source_id'] in indexed or s['snapshot'] not in ('before','after','target') or not path_ok(s['path'])):
             raise ReviewError('sources.identity: invalid')
         if any(type(s[k]) is not int for k in ('start_line','end_line')) or not 1 <= s['start_line'] <= s['end_line']:
             raise ReviewError('sources.range: invalid')
-        import re
         if not isinstance(s['blob'], str) or not re.fullmatch('[0-9a-f]{40}', s['blob']) or not isinstance(s['text_hash'], str) or not re.fullmatch('[0-9a-f]{64}', s['text_hash']):
             raise ReviewError('sources.hash: invalid')
         indexed[s['source_id']] = s
@@ -122,6 +125,8 @@ def validate_result(result, data):
         for ref in f['references']:
             if not isinstance(ref, dict) or set(ref) != {'source_id','snapshot','path','blob','start_line','end_line'}:
                 raise ReviewError(f'findings.{i}.reference.fields: invalid')
+            if not isinstance(ref['source_id'], str):
+                raise ReviewError(f'findings.{i}.reference: invalid source identifier')
             s = indexed.get(ref['source_id'])
             if (not s
                     or any(ref[k] != s[k] for k in ('snapshot','path','blob'))
@@ -175,7 +180,7 @@ def payload(data, result):
     record = base64.b64encode(json.dumps(result,separators=(',',':')).encode()).decode()
     if len(record.encode()) > 32768:
         raise ReviewError('cache.record: exceeds 32 KiB')
-    body = 'Claude PR review v2\n\n' + safe_text(result['content']['summary'])
+    body = 'Claude PR review\n\n' + safe_text(result['content']['summary'])
     body += '\nHead: ' + data['head'] + '\nGate: ' + result['gate_outcome']
     if result['coverage'] == 'partial':
         body += '\n\n**INCOMPLETE REVIEW** — success does not mean complete coverage.'
@@ -186,7 +191,7 @@ def payload(data, result):
         text = f['severity'].upper() + '\n' + safe_text(f['description']) + '\nEvidence:\n' + safe_text(f['evidence']) + '\nRecommendation:\n' + safe_text(f['recommendation'])
         for ref in f['references']:
             sha = data[{'before':'merge_base','after':'head','target':'base'}[ref['snapshot']]]
-            text += f"\n[Source {safe_text(ref['source_id'])}](https://github.com/{data['repository']}/blob/{sha}/{quote(ref['path'],safe='/')}#L{ref['start_line']}-L{ref['end_line']})"
+            text += f"\n[Source {ref['source_id']}](https://github.com/{data['repository']}/blob/{sha}/{quote(ref['path'],safe='/')}#L{ref['start_line']}-L{ref['end_line']})"
         a = f['anchor']
         inline = False
         if a is not None:
@@ -207,6 +212,7 @@ def payload(data, result):
     return dict(commit_id=data['head'],event='COMMENT',body=body,comments=comments)
 
 
+@bounded(TIMERS['analysis'])
 def analyze(data, github=None, recorded=None, client=None, repository_path='.', diagnostics=None, cache_only=False):
     from .context import ContextReader, TOOLS
     from .service import assert_current
@@ -222,26 +228,34 @@ def analyze(data, github=None, recorded=None, client=None, repository_path='.', 
             event('cache.hit', origin_identity=old['identity'], origin_reviews=[dict(id=r.get('id'),url=r.get('html_url')) for r in reviews if '<!-- claude-pr-review:'+digest(data)+' -->' in (r.get('body') or '')], current_calls=0, current_cost=0)
             return old
     event('configuration', model=data['model'], mode=data['mode'], budget=review_budget(data['model']), controls=review_controls())
-    event('cache.miss', reason='no matching v2 review',cache_only=cache_only)
+    event('cache.miss', reason='no matching review',cache_only=cache_only)
     if cache_only:
         raise ReviewError('cache.miss: cache-only mode prohibits model calls')
     started = time.monotonic()
     controls = review_controls()
     prompt = system_prompt()
     reader = ContextReader(repository_path, data, diagnostics=diagnostics)
-    sources = reader.initial_context() if data['mode'] == 'context' else []
-    # Diff mode reads a continuous span from the first to last displayed line, capped
-    # at 200 lines per side/file. This includes inter-hunk context and can omit later
-    # hunks; the baseline extraction/citation defect remains open (MD-01).
+    if data['diff'] and data['mode'] == 'context':
+        reader.initial_context()
+    # Request each displayed hunk separately; distant hunks must not disappear
+    # inside an arbitrary first-to-last 200-line span. Reader limits still apply
+    # and every denied/truncated range records an explicit coverage limitation.
     if data['mode'] == 'diff':
+        old_paths = {new: old for old, new in re.findall(r'^diff --git a/(.+) b/(.+)$', data['diff'], re.M)}
         for path, sides in locations(data['diff']).items():
             for side, snapshot in [('RIGHT','after'),('LEFT','before')]:
-                lines = sorted(sides[side])
-                if lines:
-                    reader.execute('read_file',dict(snapshot=snapshot,path=path,start_line=lines[0],end_line=min(lines[-1],lines[0]+199)))
-        sources = list(reader.sources)
+                by_hunk = {}
+                for line, hunk in sides[side].items():
+                    by_hunk.setdefault(hunk, []).append(line)
+                for lines in by_hunk.values():
+                    end = max(lines)
+                    for start in range(min(lines), end + 1, 200):
+                        reader.execute('read_file', dict(snapshot=snapshot,
+                            path=old_paths[path] if side == 'LEFT' else path,
+                            start_line=start, end_line=min(end, start + 199)))
     usage = dict(input_tokens=0,output_tokens=0)
     calls = 0
+    tool_ids = set()
     budget = review_budget(data['model'])
     reserved_cost = Decimal(0)
     input_rate = Decimal(budget['input_rate'])
@@ -252,16 +266,20 @@ def analyze(data, github=None, recorded=None, client=None, repository_path='.', 
             from anthropic import Anthropic
             key = os.environ.get('ANTHROPIC_API_KEY')
             if not key: raise ReviewError('provider.credential: missing ANTHROPIC_API_KEY')
-            client = Anthropic(api_key=key, timeout=60, max_retries=0)
+            client = Anthropic(api_key=key, timeout=TIMERS['generation_http'], max_retries=0)
     def pack():
         return dict(diff=data['diff'], metadata=data['metadata'], sources=list(reader.sources), limitations=list(reader.limitations))
     def call(messages, final=False):
         nonlocal calls, reserved_cost
-        if time.monotonic()-started > 240:
+        if time.monotonic()-started > TIMERS['analysis'] - TIMERS['generation']:
             raise ReviewError('budget.time: final-call reserve exhausted')
         if github: assert_current(github,data)
         kwargs = dict(model=data['model'],system=prompt,messages=messages,max_tokens=controls['final_output'] if final else controls['research_output'])
-        if final: kwargs['output_config'] = {'format':{'type':'json_schema','schema':schema()}}
+        # Haiku 5.5 defaults to adaptive thinking; low effort leaves room for
+        # useful output inside the bounded exploration/final output budgets.
+        if data['model'] == DEFAULT_MODEL:
+            kwargs['output_config'] = {'effort': 'low'}
+        if final: kwargs.setdefault('output_config', {})['format'] = {'type':'json_schema','schema':schema()}
         else: kwargs['tools'] = TOOLS
         # Conservative UTF-8 byte bound: tokenization cannot use more tokens than
         # bytes plus framing. Count endpoint is deliberately not a paid model call.
@@ -277,43 +295,79 @@ def analyze(data, github=None, recorded=None, client=None, repository_path='.', 
             raise ReviewError('budget.cost: request plus final reserve exceeds ceiling')
         if hasattr(client.messages, 'count_tokens'):
             count_args = {k:v for k,v in kwargs.items() if k in ('model','system','messages','tools','output_config')}
+            count_args['timeout'] = TIMERS['token_count_http']  # Transport expiry precedes the 30 s watchdog.
             event('tokens.start', operation_id=f'count-{calls+1:02d}')
             if diagnostics: diagnostics.request(f'count-{calls+1:02d}', count_args)
-            try:
-                counted = client.messages.count_tokens(**count_args).input_tokens
-            except Exception as error:
-                if diagnostics: diagnostics.error(error,operation_id=f'count-{calls+1:02d}',error_code='provider.token_count')
-                raise ReviewError('provider.token_count: preflight failed; no model call') from None
+            for attempt in range(MAX_ATTEMPTS):
+                try:
+                    with deadline(TIMERS['token_count']):
+                        counted = client.messages.count_tokens(**count_args).input_tokens
+                    break
+                except Exception as error:
+                    if attempt == MAX_ATTEMPTS - 1 or not transient(error):
+                        if diagnostics: diagnostics.error(error,operation_id=f'count-{calls+1:02d}',error_code='provider.token_count')
+                        raise ReviewError('provider.token_count: preflight failed; no model call') from None
+                    event('transport.retry', provider='token_count', attempt=attempt + 2)
+                    backoff(attempt)
             if diagnostics: diagnostics.response(f'count-{calls+1:02d}',dict(input_tokens=counted))
             event('tokens.end', operation_id=f'count-{calls+1:02d}', input_tokens=counted)
             if type(counted) is not int or counted > controls['input_tokens'] or counted < 0:
                 raise ReviewError('budget.input: token preflight exceeds configured limit')
-        if time.monotonic()-started > 240:
+            # Provider framing can exceed the local serialization estimate.
+            # Reserve the larger count before submitting a paid request.
+            upper = max(upper, counted)
+            cost = (upper * input_rate + kwargs['max_tokens'] * output_rate) / Decimal(1000000)
+            if reserved_cost + cost + final_reserve > ceiling:
+                raise ReviewError('budget.cost: counted request plus final reserve exceeds ceiling')
+        if time.monotonic()-started > TIMERS['analysis'] - TIMERS['generation']:
             raise ReviewError('budget.time: preflight exhausted final-call reserve')
         if github: assert_current(github,data)
         reserved_cost += cost
         calls += 1
         op = f'call-{calls:02d}'
-        event('sdk.start',operation_id=op,model=data['model'],timeout=60,max_tokens=kwargs['max_tokens'],prompt_hash=data['policies']['prompt'],schema_hash=data['policies']['schema'],input_upper_bound=upper)
+        event('sdk.start',operation_id=op,model=data['model'],timeout=TIMERS['generation'],max_tokens=kwargs['max_tokens'],prompt_hash=data['policies']['prompt'],schema_hash=data['policies']['schema'],input_upper_bound=upper)
         if diagnostics: diagnostics.context(reader.sources)
         if diagnostics: diagnostics.request(op, kwargs)
-        def timeout_handler(signum,frame): raise TimeoutError()
-        previous = signal.signal(signal.SIGALRM,timeout_handler)
         call_started = time.monotonic()
+        for attempt in range(MAX_ATTEMPTS):
+            if attempt:
+                # Keep each submitted attempt's conservative reservation even
+                # including ambiguous transport failures; never reclaim estimated spend.
+                if reserved_cost + cost + final_reserve > ceiling:
+                    raise ReviewError('budget.cost: retry plus final reserve exceeds ceiling')
+                if time.monotonic() - started > TIMERS['analysis'] - TIMERS['generation']:
+                    raise ReviewError('budget.time: retry exhausted final-call reserve')
+                if github: assert_current(github, data)
+                reserved_cost += cost
+            try:
+                with deadline(TIMERS['generation']):
+                    response = client.messages.create(**kwargs)
+                break
+            except Exception as error:
+                if attempt == MAX_ATTEMPTS - 1 or not transient(error):
+                    if diagnostics: diagnostics.error(error,operation_id=op,error_code='provider.call')
+                    raise ReviewError('provider.call: failed after bounded retry policy') from None
+                event('transport.retry', provider='generation', operation_id=op, attempt=attempt + 2, status=getattr(error, 'status_code', None), exception_class=type(error).__name__)
+                backoff(attempt)
         try:
-            signal.setitimer(signal.ITIMER_REAL,min(60,300-(time.monotonic()-started)))
-            response = client.messages.create(**kwargs)
-        except Exception as error:
-            if diagnostics: diagnostics.error(error,operation_id=op,error_code='provider.call')
-            raise ReviewError('provider.call: failed; no paid retry') from None
-        finally:
-            signal.setitimer(signal.ITIMER_REAL,0)
-            signal.signal(signal.SIGALRM,previous)
-        blocks = [b.model_dump(exclude_none=True) if hasattr(b,'model_dump') else vars(b) for b in response.content if b.type in ('text','tool_use')]
-        raw = dict(id=getattr(response,'id',None),request_id=getattr(response,'_request_id',None),model=response.model,stop_reason=response.stop_reason,content=blocks,usage=dict(input_tokens=response.usage.input_tokens,output_tokens=response.usage.output_tokens))
+            blocks = [b.model_dump(exclude_none=True) if hasattr(b,'model_dump') else vars(b) for b in response.content]
+            raw = dict(id=getattr(response,'id',None),request_id=getattr(response,'_request_id',None),model=response.model,stop_reason=response.stop_reason,content=blocks,usage=dict(input_tokens=response.usage.input_tokens,output_tokens=response.usage.output_tokens))
+            valid_blocks = all(isinstance(b, dict) and b.get('type') in ('text','tool_use','thinking','redacted_thinking') for b in blocks)
+        except (AttributeError, TypeError, ValueError):
+            raise ReviewError('provider.response: malformed response') from None
+        if not valid_blocks:
+            raise ReviewError('provider.response: unsupported content block')
+        if any(b['type'] == 'text' and not isinstance(b.get('text'), str) for b in blocks):
+            raise ReviewError('provider.response: malformed text block')
+        if any(type(v) is not int or v < 0 for v in raw['usage'].values()):
+            raise ReviewError('provider.usage: invalid token usage')
+        if raw['usage']['input_tokens'] > controls['input_tokens'] or raw['usage']['output_tokens'] > kwargs['max_tokens']:
+            raise ReviewError('provider.usage: reported token usage exceeds request limits')
         if diagnostics: diagnostics.response(op,raw)
         event('sdk.end',operation_id=op,stop_reason=response.stop_reason,duration_ms=round((time.monotonic()-call_started)*1000),message_id=raw['id'],request_id=raw['request_id'],usage=raw['usage'],tool_calls=sum(b['type']=='tool_use' for b in blocks))
         if response.model != data['model']: raise ReviewError('provider.model: identity mismatch')
+        if response.stop_reason == 'end_turn' and any(b['type'] == 'tool_use' for b in blocks):
+            raise ReviewError('provider.tools: tool use without tool_use stop reason')
         for k in usage: usage[k] += raw['usage'][k]
         return response, blocks
     if recorded is not None:
@@ -336,8 +390,15 @@ def analyze(data, github=None, recorded=None, client=None, repository_path='.', 
                 if response.stop_reason != 'tool_use':
                     raise ReviewError('provider.stop: incomplete exploration')
                 uses = [b for b in blocks if b['type']=='tool_use']
-                if not uses or len({b['id'] for b in uses}) != len(uses):
+                if (not uses or any(not {'type','id','name','input'} <= set(b) or set(b) - {'type','id','name','input','caller'}
+                        or ('caller' in b and b['caller'] != {'type': 'direct'})
+                        or not isinstance(b['id'], str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,200}', b['id'])
+                        or not isinstance(b['name'], str) or not isinstance(b['input'], dict) for b in uses)
+                        or len({b['id'] for b in uses}) != len(uses)):
                     raise ReviewError('provider.tools: malformed tool use')
+                if any(b['id'] in tool_ids for b in uses):
+                    raise ReviewError('provider.tools: reused tool identifier')
+                tool_ids.update(b['id'] for b in uses)
                 messages.append(dict(role='assistant',content=blocks))
                 replies = []
                 for b in uses:
@@ -374,9 +435,9 @@ def analyze(data, github=None, recorded=None, client=None, repository_path='.', 
     if diagnostics: diagnostics.context(reader.sources)
     result = dict(version=2,identity=digest(data),model=data['model'],duration_ms=round((time.monotonic()-started)*1000),content=content,usage=usage,live=recorded is None and bool(calls),sources=[source_metadata(s) for s in reader.sources],calls=calls,coverage=content.get('status') if isinstance(content,dict) else None)
     result['gate_outcome']='success' if isinstance(content,dict) and isinstance(content.get('findings'),list) and all(isinstance(f,dict) for f in content['findings']) and gate(result) else 'failure'
-    event('validation.start',contract='v2.result')
+    event('validation.start',contract='review.result')
     validate_result(result,data)
-    event('validation.end',contract='v2.result',outcome='valid')
+    event('validation.end',contract='review.result',outcome='valid')
     # Only metadata cited by findings belongs in the durable cache record.
     cited={r['source_id'] for f in content['findings'] for r in f['references']}
     result['sources']=[s for s in result['sources'] if s['source_id'] in cited]

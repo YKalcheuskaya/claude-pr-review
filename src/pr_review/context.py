@@ -6,18 +6,20 @@ import subprocess
 import time
 
 from .core import ReviewError, SHA, digest, locations, path_ok
+from .runtime import bounded, deadline, TIMERS
 from .config import review_controls
+from .security import (DENIED_DIRECTORIES, DENIED_SUFFIXES, DENIED_NAMES, restricted_path, sensitive, runtime_secrets)
 
 POLICY = {
-    "version": 2, "max_paths": 10000, "max_reader_seconds": 300,
+    "version": 2, "max_paths": 10000, "max_reader_seconds": TIMERS["analysis"],
     "max_scan_bytes": 32 * 1024 * 1024, "max_blob_bytes": 256 * 1024,
     "max_read_bytes": 16 * 1024, "max_read_lines": 200,
     "list_page": 100, "search_page": 50,
     "initial_file_bytes": 8 * 1024, "initial_changed_bytes": 32 * 1024,
     "initial_root_bytes": 16 * 1024,
-    "denied_directories": [".git", ".aws", ".ssh", ".venv", "venv", "node_modules", "vendor", "dist", "build", "target", "coverage", "__pycache__", ".next", ".nuxt", "generated"],
-    "denied_suffixes": [".pem", ".key", ".p12", ".pfx", ".keystore", ".pyc", ".min.js", ".map", ".lock"],
-    "denied_names": ["credentials", "credentials.json", "secrets.json", "secrets.yaml", "secrets.yml", "id_rsa", "id_ed25519", ".npmrc", ".netrc", ".pypirc"],
+    "denied_directories": DENIED_DIRECTORIES,
+    "denied_suffixes": DENIED_SUFFIXES,
+    "denied_names": DENIED_NAMES,
 }
 POLICY_HASH = digest(POLICY)
 
@@ -32,7 +34,6 @@ TOOLS = [
     {"name": "search_text", "description": "Literal, case-sensitive search of bounded permitted UTF-8 Git blobs.", "input_schema": _schema({"snapshot": _SNAPSHOT, "query": {"type": "string", "minLength": 1, "maxLength": 1000}, "path_prefix": {"type": "string"}, "cursor": {"type": "integer", "minimum": 0}}, ["query"])},
     {"name": "read_file", "description": "Read a tracked UTF-8 blob range, up to 200 lines and 16 KiB. Lines start at 1.", "input_schema": _schema({"snapshot": _SNAPSHOT, "path": {"type": "string"}, "start_line": {"type": "integer", "minimum": 1}, "end_line": {"type": "integer", "minimum": 1}}, ["path"])},
 ]
-_SECRET = re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}|github_pat_[A-Za-z0-9_]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|-----BEGIN (?:[A-Z ]*PRIVATE KEY)-----|(?im:^\s*(?:password|secret|api[_-]?key|access[_-]?token)\s*[:=]\s*[^\s#]{8,})")
 _ROOTS = {"readme.md", "readme", "pyproject.toml", "requirements.txt", "setup.cfg", "setup.py", "package.json", "pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "tsconfig.json"}
 
 
@@ -48,7 +49,7 @@ class ContextReader:
         self.operations = 0
         self._git_operations = 0
         self._deadline = time.monotonic() + POLICY["max_reader_seconds"]
-        self._runtime_secrets = tuple(v for k, v in os.environ.items() if v and (k.endswith(("_TOKEN", "_API_KEY", "_PASSWORD", "_SECRET")) or k == "GH_TOKEN"))
+        self._runtime_secrets = runtime_secrets()
         self._trees, self._blobs, self._cache, self._source_keys = {}, {}, {}, {}
         self._scan_bytes = {s: 0 for s in self.snapshots}
         self._tree_truncated = set()
@@ -80,7 +81,7 @@ class ContextReader:
     def _git(self, *args):
         operation_id, started = self._start_git(args)
         try:
-            result = subprocess.run(["git", "--no-pager", "-C", self.repository_path, *args], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=self._env(), timeout=max(0.001, min(10, self._deadline - time.monotonic())), check=True)
+            result = subprocess.run(["git", "--no-pager", "-C", self.repository_path, *args], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=self._env(), timeout=max(0.001, min(TIMERS["context_git"], self._deadline - time.monotonic())), check=True)
             self._git_event("git.end", operation_id=operation_id, bytes=len(result.stdout), duration_ms=int((time.monotonic() - started) * 1000))
             return result.stdout
         except (subprocess.SubprocessError, OSError) as exc:
@@ -91,14 +92,9 @@ class ContextReader:
     def _allowed(path):
         if not path_ok(path):
             return False
-        parts = path.lower().split("/")
-        name = parts[-1]
-        return not (any(p in POLICY["denied_directories"] for p in parts)
-                    or any(p == ".env" or p.startswith(".env.") for p in parts)
-                    or name in POLICY["denied_names"]
-                    or name.endswith(tuple(POLICY["denied_suffixes"]))
-                    or name.startswith(("id_rsa.", "id_ed25519.", "secrets.")))
+        return not restricted_path(path)
 
+    @bounded(TIMERS["context_git"] + TIMERS["git_cleanup"])
     def _tree(self, snapshot):
         if snapshot in self._trees:
             return self._trees[snapshot]
@@ -107,14 +103,14 @@ class ContextReader:
         entries = {}
         count = 0
         operation_id, started = self._start_git(("ls-tree", snapshot, self.snapshots[snapshot]))
-        deadline = min(started + 10, self._deadline)
+        tree_deadline = min(started + TIMERS["context_git"], self._deadline)
         incomplete = True
         byte_count = 0
         try:
-            with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=self._env()) as proc:
+            with deadline(max(.001, tree_deadline - time.monotonic())), subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=self._env()) as proc:
                 try:
                     while True:
-                        if time.monotonic() >= deadline:
+                        if time.monotonic() >= tree_deadline:
                             raise ReviewError("Git tree time limit exceeded")
                         record = bytearray()
                         while True:
@@ -146,8 +142,15 @@ class ContextReader:
                             self._limit(f"{snapshot}: restricted paths or non-regular objects omitted")
                 finally:
                     if incomplete and proc.poll() is None:
-                        proc.terminate()
-                    proc.wait(timeout=10)
+                        proc.kill()
+                    try:
+                        proc.wait(timeout=max(.001, min(TIMERS["context_git"], tree_deadline - time.monotonic())))
+                    finally:
+                        # EOF does not imply process exit. Reap even when a
+                        # deadline interrupts wait after stdout has closed.
+                        if proc.poll() is None:
+                            proc.kill()
+                        proc.wait(timeout=1)
                 if not incomplete and proc.returncode != 0:
                     raise ReviewError("Git tree operation failed")
         except (OSError, subprocess.SubprocessError, ReviewError) as exc:
@@ -183,7 +186,7 @@ class ContextReader:
             text = raw.decode("utf-8")
             if "\0" in text or any(ord(c) < 32 and c not in "\n\r\t" for c in text):
                 raise UnicodeError()
-            if _SECRET.search(text) or any(secret in text for secret in self._runtime_secrets):
+            if sensitive(text) or any(secret in text for secret in self._runtime_secrets):
                 raise ReviewError("credential-like blob denied")
         except UnicodeError:
             self._blobs[key] = ReviewError("non-text blob denied")
@@ -280,7 +283,7 @@ class ContextReader:
                 result["next_cursor"] = cursor + len(page)
             return result
         query = args["query"]
-        if _SECRET.search(query) or any(secret in query for secret in self._runtime_secrets):
+        if sensitive(query) or any(secret in query for secret in self._runtime_secrets):
             raise ReviewError("credential-like search query denied")
         if not query or "\n" in query or "\r" in query or "\0" in query:
             raise ReviewError("query must be nonempty single-line literal text")

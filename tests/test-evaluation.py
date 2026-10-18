@@ -7,12 +7,12 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location("evaluation_v2", ROOT / "scripts" / "evaluate-v2.py")
+spec = importlib.util.spec_from_file_location("evaluation_current", ROOT / "scripts" / "evaluate.py")
 ev = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ev)
 
 
-class EvaluationV2(unittest.TestCase):
+class Evaluation(unittest.TestCase):
     def test_corpus_shape_and_cross_file_oracles(self):
         self.assertEqual(len(ev.cases("development")), 3)
         held = ev.cases("held-out")
@@ -70,6 +70,17 @@ class EvaluationV2(unittest.TestCase):
             policy.write_text("changed")
             with self.assertRaises(ValueError):
                 ev.verify_freeze(seal)
+
+    def test_freeze_covers_every_runtime_module_and_runner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            seal_path = Path(tmp) / "freeze.json"
+            seal = ev.freeze(seal_path, [ROOT / "src" / "pr_review"])
+            self.assertTrue({str(path.resolve()) for path in ev.runtime_policy_paths()}.issubset(seal["files"]))
+            original = ev.sha
+            def changed(path):
+                return "0" * 64 if Path(path).name == "security.py" else original(path)
+            with patch.object(ev, "sha", side_effect=changed), self.assertRaises(ValueError):
+                ev.verify_freeze(seal_path)
 
     def test_budget_failed_and_unknown_remain_reserved(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -166,29 +177,29 @@ class PaidExecutionAdapter(unittest.TestCase):
     def setup_case(self, tmp):
         import sys
         sys.path.insert(0, str(ROOT / "src"))
-        from pr_review import v2, context, config
+        from pr_review import review, context, config
         directory = ev.prepare_case(ev.cases("held-out")[0], tmp)
         seal = Path(tmp) / "freeze.json"
-        ev.freeze(seal, [v2.__file__, context.__file__, config.__file__, Path(v2.__file__).with_name("review-policy.md")])
+        ev.freeze(seal, ev.runtime_policy_paths())
         return dict(input_path=directory / "context-input.json", repository_path=directory / "repository",
                     output=Path(tmp) / "result.json", diagnostics_dir=Path(tmp) / "diagnostics",
                     ledger_path=Path(tmp) / "ledger.json", seal_path=seal, run_id="test-run",
                     authorize_paid=True, authorization_reference="separately-recorded-human-approval",
-                    pricing_reference="dated-provider-price-reference", input_rate="1", output_rate="5")
+                    pricing_reference="dated-provider-price-reference", input_rate="0.5", output_rate="2.5")
 
     def test_selected_model_and_prices_are_preserved_by_adapter(self):
-        from pr_review import v2, context, config
+        from pr_review import review, context, config
         with tempfile.TemporaryDirectory() as tmp, patch.dict('os.environ', {
                 'CLAUDE_INPUT_USD_PER_MILLION': '3', 'CLAUDE_OUTPUT_USD_PER_MILLION': '15',
                 'CLAUDE_MAX_REVIEW_USD': '1'}):
             model = 'claude-selected-test-model'
             directory = ev.prepare_case(ev.cases('development')[0], tmp, model=model)
             seal = Path(tmp) / 'freeze.json'
-            ev.freeze(seal, [v2.__file__, context.__file__, config.__file__, Path(v2.__file__).with_name("review-policy.md")], model=model)
+            ev.freeze(seal, ev.runtime_policy_paths(), model=model)
             data = ev.read(directory / 'context-input.json')
-            result = v2.analyze(data, recorded={'status': 'complete', 'summary': 'Authored replay',
+            result = review.analyze(data, recorded={'status': 'complete', 'summary': 'Authored replay',
                                 'findings': [], 'limitations': []}, repository_path=directory/'repository')
-            with patch('pr_review.v2.analyze', return_value=result) as analyze:
+            with patch('pr_review.review.analyze', return_value=result) as analyze:
                 ev.run_paid(input_path=directory/'context-input.json', repository_path=directory/'repository',
                             output=Path(tmp)/'result.json', diagnostics_dir=Path(tmp)/'trace',
                             ledger_path=Path(tmp)/'ledger.json', seal_path=seal, run_id='selected',
@@ -203,7 +214,7 @@ class PaidExecutionAdapter(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             options = self.setup_case(tmp)
             options["authorize_paid"] = False
-            with patch("pr_review.v2.analyze") as analyze:
+            with patch("pr_review.review.analyze") as analyze:
                 with self.assertRaises(ValueError):
                     ev.run_paid(**options)
                 analyze.assert_not_called()
@@ -219,7 +230,7 @@ class PaidExecutionAdapter(unittest.TestCase):
                 self.assertEqual(row["input_tokens"], 120000)
                 self.assertEqual(row["output_tokens"], 12000)
                 raise RuntimeError("untrusted-secret-exception")
-            with patch("pr_review.v2.analyze", side_effect=fail):
+            with patch("pr_review.review.analyze", side_effect=fail):
                 with self.assertRaisesRegex(ValueError, "reservation retained"):
                     ev.run_paid(**options)
             self.assertEqual(len(ev.read(options["ledger_path"])["entries"]), 1)
@@ -230,11 +241,11 @@ class PaidExecutionAdapter(unittest.TestCase):
     def test_success_writes_valid_result_without_publication(self):
         with tempfile.TemporaryDirectory() as tmp:
             options = self.setup_case(tmp)
-            from pr_review import v2
+            from pr_review import review
             data = ev.read(options["input_path"])
-            result = v2.analyze(data, recorded={"status": "complete", "summary": "Offline fixture",
+            result = review.analyze(data, recorded={"status": "complete", "summary": "Offline fixture",
                                 "findings": [], "limitations": []}, repository_path=options["repository_path"])
-            with patch("pr_review.v2.analyze", return_value=result) as analyze:
+            with patch("pr_review.review.analyze", return_value=result) as analyze:
                 ev.run_paid(**options)
                 analyze.assert_called_once()
             self.assertEqual(ev.read(options["output"]), result)
@@ -244,17 +255,17 @@ class PaidExecutionAdapter(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             options = self.setup_case(tmp)
             options["input_rate"] = "2"
-            with patch("pr_review.v2.analyze") as analyze:
+            with patch("pr_review.review.analyze") as analyze:
                 with self.assertRaises(ValueError):
                     ev.run_paid(**options)
                 analyze.assert_not_called()
             self.assertFalse(options["ledger_path"].exists())
-            options["input_rate"] = "1"
+            options["input_rate"] = "0.5"
             other = Path(tmp) / "other-policy.txt"
             other.write_text("not the actual policies")
             options["seal_path"] = Path(tmp) / "other-freeze.json"
             ev.freeze(options["seal_path"], [other])
-            with patch("pr_review.v2.analyze") as analyze:
+            with patch("pr_review.review.analyze") as analyze:
                 with self.assertRaises(ValueError):
                     ev.run_paid(**options)
                 analyze.assert_not_called()

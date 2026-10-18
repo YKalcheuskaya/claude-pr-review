@@ -16,10 +16,10 @@ import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-CORPUS = ROOT / "evaluation" / "v2"
-MODEL = "claude-haiku-4-5-20251001"
+CORPUS = ROOT / "evaluation" / "corpus"
+MODEL = "claude-haiku-5-5"
 CAPS = {"context": Decimal("0.20"), "diff": Decimal("0.05")}
-PILOT_CAP = Decimal("4.00")  # Remaining dollar of the $5 ceiling is not authorized automatically.
+PILOT_CAP = Decimal("4.00")  # Default pilot reserve; increasing it requires separate operator authorization.
 
 
 def read(path):
@@ -105,15 +105,29 @@ def prepare_case(case, output, model=MODEL):
     return directory
 
 
+def runtime_policy_paths():
+    package = ROOT / "src" / "pr_review"
+    return sorted(package.glob("*.py")) + [package / "review-policy.md", Path(__file__).resolve()]
+
+
 def freeze(output, policies, model=MODEL):
     """Seal corpus, oracle and actual prompt/policy files before held-out evaluation."""
     if Path(output).exists():
-        raise ValueError("Freeze output already exists; do not overwrite historical seals")
+        raise ValueError("Freeze output already exists; do not overwrite existing seals")
     sources = sorted((CORPUS / "cases").glob("*.json"))
     labels = sorted((CORPUS / "labels").glob("*.json"))
     if not policies:
         raise ValueError("Supply every actual prompt/schema/tool policy with --policy")
-    files = {str(path.resolve()): sha(path) for path in sources + labels + [Path(p) for p in policies]}
+    selected = []
+    for supplied in policies:
+        path = Path(supplied)
+        if path.is_dir():
+            selected.extend(sorted(path.glob("*.py")))
+            selected.append(path / "review-policy.md")
+        else:
+            selected.append(path)
+    selected.append(Path(__file__).resolve())
+    files = {str(path.resolve()): sha(path) for path in sources + labels + selected}
     value = {"version": 2, "model": model, "files": files}
     value["freeze_id"] = hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
     write(output, value)
@@ -163,7 +177,7 @@ def reserve(ledger_path, run_id, mode, input_tokens, output_tokens, input_rate,
     # Hold the full per-review cap even after failures/unknown outcomes. No optimistic refunds.
     total = sum((money(row["reserved_usd"]) for row in ledger["entries"]), Decimal(0))
     if total + cap > PILOT_CAP:
-        raise ValueError("Aggregate pilot cap exhausted; the final $1 needs separate authorization")
+        raise ValueError("Aggregate pilot cap exhausted; choose a separately authorized experiment budget")
     ledger["entries"].append({
         "run_id": run_id, "mode": mode, "status": "reserved-or-unknown",
         "reserved_usd": str(cap), "preflight_estimate_usd": str(estimated),
@@ -197,13 +211,13 @@ def run_paid(input_path, repository_path, output, diagnostics_dir, ledger_path, 
     if not authorize_paid or not authorization_reference.strip() or not pricing_reference.strip():
         raise ValueError("Separate explicit human approval is required before paid execution")
     if Path(output).exists():
-        raise ValueError("Result output already exists; preserve historical runs")
+        raise ValueError("Result output already exists; preserve existing runs")
     seal = verify_freeze(seal_path)
     sys.path.insert(0, str(ROOT / "src"))
-    from pr_review import v2
+    from pr_review import review
     from pr_review.diagnostics import Diagnostics
     data = read(input_path)
-    v2.validate_input(data)
+    review.validate_input(data)
     if data["model"] != seal["model"]:
         raise ValueError("Prepared input model must match the frozen experiment model")
     from pr_review.config import review_budget, review_controls
@@ -211,9 +225,9 @@ def run_paid(input_path, repository_path, output, diagnostics_dir, ledger_path, 
     if money(input_rate) != money(budget["input_rate"]) or money(output_rate) != money(budget["output_rate"]):
         raise ValueError("Verified rates must match configured input/output rates; reprepare inputs after changes")
     from pr_review import context, config
-    required_policies = {str(Path(module.__file__).resolve()) for module in (v2, context, config)} | {str(Path(v2.__file__).with_name('review-policy.md').resolve())}
+    required_policies = {str(path.resolve()) for path in runtime_policy_paths()}
     if not required_policies.issubset(seal["files"]):
-        raise ValueError("Freeze must include actual v2 prompt/schema and context/tool policy modules")
+        raise ValueError("Freeze must include every runtime module, review policy and evaluation runner")
     repo = Path(repository_path).resolve()
     for snapshot in ("base", "head", "merge_base"):
         if git(repo, "rev-parse", data[snapshot] + "^{commit}") != data[snapshot]:
@@ -234,8 +248,8 @@ def run_paid(input_path, repository_path, output, diagnostics_dir, ledger_path, 
                 input_rate, output_rate, authorization_reference, pricing_reference, review_cap=budget["max_cost"])
         diagnostics.event("evaluation.reserved", run_id=run_id, freeze_id=seal["freeze_id"],
                           reserved_usd=budget["max_cost"] or str(CAPS[data["mode"]]), snapshots={key: data[key] for key in ("base", "head", "merge_base")})
-        result = v2.analyze(data, github=None, repository_path=repo, diagnostics=diagnostics)
-        v2.validate_result(result, data)
+        result = review.analyze(data, github=None, repository_path=repo, diagnostics=diagnostics)
+        review.validate_result(result, data)
         write(output, result)
         diagnostics.finalize("success", run_id=run_id, freeze_id=seal["freeze_id"])
         return result

@@ -75,7 +75,8 @@ def cache_only_mode():
 def effective_config(model=None):
     """Return safe effective settings without reading credentials or calling APIs."""
     model = selected_model() if model is None else _model_id(model)
-    return {"model": model, "budget": review_budget(model), "controls": review_controls()}
+    from .runtime import TIMERS
+    return {"model": model, "budget": review_budget(model), "controls": review_controls(), "timers": dict(TIMERS)}
 
 
 def _positive_decimal(name, default=None):
@@ -84,13 +85,17 @@ def _positive_decimal(name, default=None):
         raw = default
     if raw is None:
         return None
+    if len(raw) > 128:
+        raise ReviewError(
+            f"configuration: {name} decimal representation exceeds limits",
+            stage="configuration", code="configuration.invalid_budget")
     try:
         value = Decimal(raw)
     except (InvalidOperation, ValueError):
         raise ReviewError(
             f"configuration: {name} must be a finite positive decimal",
             stage="configuration", code="configuration.invalid_budget") from None
-    if not value.is_finite() or value <= 0:
+    if not value.is_finite() or value <= 0 or abs(value.adjusted()) > 100:
         raise ReviewError(
             f"configuration: {name} must be a finite positive decimal",
             stage="configuration", code="configuration.invalid_budget")
@@ -102,16 +107,19 @@ def _positive_decimal(name, default=None):
 def review_budget(model):
     """Resolve prices per million tokens and an optional review cost ceiling.
 
-    The tested default has historical 1/5 USD rates. Other model identifiers
+    The default uses conservative 0.50/2.50 USD rates, covering Haiku 5.5's
+    higher tier above 100,000 input tokens (the input limit allows 128,000).
+    Reference: https://platform.claude.com/docs/en/models/haiku-5-5/overview
+    (verified 2026-10-18). Other model identifiers
     require explicit prices so choosing a model never silently reuses Haiku's
     budget estimate. None for max_cost preserves the caller's mode ceiling.
     Blank Actions variables count as unset. Read on every call; canonical
     decimal strings also serve cache identity.
     """
     input_rate = _positive_decimal(
-        "CLAUDE_INPUT_USD_PER_MILLION", "1" if model == DEFAULT_MODEL else None)
+        "CLAUDE_INPUT_USD_PER_MILLION", "0.5" if model == DEFAULT_MODEL else None)
     output_rate = _positive_decimal(
-        "CLAUDE_OUTPUT_USD_PER_MILLION", "5" if model == DEFAULT_MODEL else None)
+        "CLAUDE_OUTPUT_USD_PER_MILLION", "2.5" if model == DEFAULT_MODEL else None)
     if input_rate is None or output_rate is None:
         raise ReviewError(
             "configuration: non-default CLAUDE_MODEL requires both "

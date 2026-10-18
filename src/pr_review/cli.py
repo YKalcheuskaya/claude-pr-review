@@ -58,7 +58,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.command == "show-config":
         try:
-            from .v2 import system_prompt, policies
+            from .review import system_prompt, policies
             settings = effective_config(args.model)
             settings["cache_only"] = cache_only_mode()
             settings["prompt"] = system_prompt()
@@ -123,7 +123,7 @@ def main(argv=None):
                     passed = publish(fresh, result, github, diagnostics=diagnostics)
                 outcome = "success" if passed else "failure"
                 diagnostics.event("gate", outcome=outcome, coverage=result.get("coverage", result["content"]["status"]))
-                if result.get("version") == 2 and result["coverage"] == "partial":
+                if result["coverage"] == "partial":
                     print("::warning::INCOMPLETE REVIEW: inspect limitations in the review and diagnostic artifact.")
                 print("Claude review gate: " + ("passed" if passed else "blocked"))
                 return 0 if passed else 1

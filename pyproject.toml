@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools==80.9.0"]
-build-backend = "setuptools.build_meta"
+requires = ["flit_core==4.1.0"]
+build-backend = "flit_core.buildapi"
 
 [project]
 name = "claude-pr-review"
@@ -12,10 +12,5 @@ dependencies = ["anthropic==1.11.0"]
 [project.scripts]
 claude-pr-review = "pr_review.cli:main"
 
-[tool.setuptools.packages.find]
-where = ["src"]
-namespaces = true
-include = ["pr_review*"]
-
-[tool.setuptools.package-data]
-pr_review = ["review-policy.md"]
+[tool.flit.module]
+name = "pr_review"
