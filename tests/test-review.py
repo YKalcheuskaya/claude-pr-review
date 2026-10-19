@@ -16,7 +16,7 @@ from pr_review.core import ReviewError, cached_result, digest, gate, payload, va
 from pr_review.context import ContextReader
 from pr_review.diagnostics import Diagnostics
 from pr_review.service import prepare, analyze, publish
-from pr_review.v2 import policies, source_metadata, verify_sources
+from pr_review.review import policies, source_metadata, verify_sources
 
 
 class Github:
@@ -33,7 +33,7 @@ class Github:
         return {'id':42}
 
 
-class V2(unittest.TestCase):
+class Review(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
         self.root=Path(self.tmp.name)
@@ -57,7 +57,7 @@ class V2(unittest.TestCase):
     def live(self):
         result=self.result(); result['live']=True;result['calls']=1
         return result
-    def test_v2_metadata_policy_and_mode_invalidate_cache(self):
+    def test_metadata_policy_and_mode_invalidate_cache(self):
         result=self.live(); publish(self.data,result,self.github,repository_path=self.root)
         self.assertEqual(cached_result(self.github.items,self.data),result)
         for variant in ({**self.data,'mode':'diff'},{**self.data,'metadata':dict(title='Edited',body='')},{**self.data,'head':'a'*40}):
@@ -119,6 +119,25 @@ class V2(unittest.TestCase):
             if kind=='validation':text=json.dumps({'bad':True})
             return NS(id='msg_final',model=self.data['model'],stop_reason='end_turn',content=[NS(type='text',text=text)],usage=NS(input_tokens=100,output_tokens=30))
         return NS(messages=NS(create=create)),calls
+    def test_haiku_adaptive_thinking_survives_tool_replay_and_final_text_parsing(self):
+        client, calls = self.mock_client()
+        original = client.messages.create
+        thinking = NS(type='thinking', thinking='', signature='fixture-signed-thinking')
+        redacted = NS(type='redacted_thinking', data='fixture-opaque-block')
+        def create(**kwargs):
+            response = original(**kwargs)
+            response.content[:0] = [thinking, redacted]
+            return response
+        client.messages.create = create
+        result = analyze(self.data, client=client, repository_path=self.root)
+        self.assertEqual(result['content']['summary'], self.clean['summary'])
+        replay = calls[1]['messages'][1]['content']
+        self.assertEqual(replay[:2], [vars(thinking), vars(redacted)])
+        self.assertEqual(replay[2]['type'], 'tool_use')
+        self.assertTrue(all(call['output_config']['effort'] == 'low' for call in calls))
+        self.assertIn('format', calls[-1]['output_config'])
+        self.assertTrue(all(not {'temperature', 'top_p', 'top_k'} & set(call) for call in calls))
+
     def test_tool_loop_final_has_no_tools_and_citations_are_in_context(self):
         client,calls=self.mock_client('finding')
         result=analyze(self.data,client=client,repository_path=self.root)
@@ -168,6 +187,110 @@ class V2(unittest.TestCase):
         (self.root/'large.py').write_text('x'*100000+'\n')
         self.git('add','.');self.git('commit','-m','large')
         with self.assertRaises(ReviewError):git(self.root,'diff',self.data['head'],'HEAD','--')
+    def test_generation_retries_transient_errors_but_not_permanent_errors(self):
+        class Rejected(Exception):
+            status_code = 429
+        client, calls = self.mock_client()
+        original = client.messages.create
+        attempts = []
+        def create(**kwargs):
+            attempts.append(kwargs)
+            if len(attempts) == 1:
+                raise Rejected()
+            return original(**kwargs)
+        client.messages.create = create
+        with patch('pr_review.review.backoff'):
+            result = analyze(self.data, client=client, repository_path=self.root)
+        self.assertTrue(result['live'])
+        self.assertEqual(len(attempts), len(calls) + 1)
+        for status in (400, 401, 403, 404, 422):
+            error = Rejected(); error.status_code = status
+            with patch.object(client.messages, 'create', side_effect=error) as create:
+                with self.assertRaises(ReviewError):
+                    analyze(self.data, client=client, repository_path=self.root)
+                self.assertEqual(create.call_count, 1)
+
+    def test_retry_retains_cost_reservation_and_stops_at_ceiling(self):
+        class Rejected(Exception):
+            status_code = 429
+        with patch.dict(os.environ, {'CLAUDE_MAX_REVIEW_USD': '.07',
+                                           'CLAUDE_INPUT_USD_PER_MILLION': '1',
+                                           'CLAUDE_OUTPUT_USD_PER_MILLION': '5'}):
+            data = {**self.data, 'policies': policies(self.data['model'])}
+            client = NS(messages=NS(create=unittest.mock.Mock(side_effect=Rejected())))
+            with patch('pr_review.review.backoff'), self.assertRaisesRegex(ReviewError, 'budget.cost'):
+                analyze(data, client=client, repository_path=self.root)
+            self.assertEqual(client.messages.create.call_count, 1)
+
+    def test_token_count_transient_retries_are_bounded(self):
+        client, calls = self.mock_client()
+        counter = unittest.mock.Mock(side_effect=[TimeoutError(), NS(input_tokens=100)])
+        client.messages.count_tokens = counter
+        # Subsequent successful counts use the last configured response.
+        def count(**kwargs):
+            return counter() if counter.call_count < 2 else NS(input_tokens=100)
+        client.messages.count_tokens = count
+        with patch('pr_review.review.backoff'):
+            result = analyze(self.data, client=client, repository_path=self.root)
+        self.assertTrue(result['live']); self.assertEqual(counter.call_count, 2)
+
+    def test_generation_and_token_preflight_stop_after_three_retries(self):
+        class Rejected(Exception):
+            status_code = 429
+        with patch.dict(os.environ, {'CLAUDE_MAX_REVIEW_USD': '.5'}):
+            data = {**self.data, 'policies': policies(self.data['model'])}
+            client = NS(messages=NS(create=unittest.mock.Mock(side_effect=Rejected())))
+            with patch('pr_review.review.backoff') as delay, self.assertRaisesRegex(ReviewError, 'provider.call'):
+                analyze(data, client=client, repository_path=self.root)
+            self.assertEqual(client.messages.create.call_count, 4)
+            self.assertEqual(delay.call_count, 3)
+            client.messages.count_tokens = unittest.mock.Mock(side_effect=TimeoutError())
+            client.messages.create.reset_mock()
+            with patch('pr_review.review.backoff') as delay, self.assertRaisesRegex(ReviewError, 'provider.token_count'):
+                analyze(data, client=client, repository_path=self.root)
+            self.assertEqual(client.messages.count_tokens.call_count, 4)
+            self.assertEqual(delay.call_count, 3)
+            client.messages.create.assert_not_called()
+
+    def test_generation_server_and_transport_failures_retry_with_cost_guard(self):
+        class ServerError(Exception):
+            status_code = 503
+        for error in (ServerError(), TimeoutError()):
+            with self.subTest(error=type(error).__name__), patch.dict(os.environ, {'CLAUDE_MAX_REVIEW_USD': '.5'}):
+                data = {**self.data, 'policies': policies(self.data['model'])}
+                client = NS(messages=NS(create=unittest.mock.Mock(side_effect=error)))
+                with patch('pr_review.review.backoff'), self.assertRaisesRegex(ReviewError, 'provider.call'):
+                    analyze(data, client=client, repository_path=self.root)
+                self.assertEqual(client.messages.create.call_count, 4)
+            with patch.dict(os.environ, {'CLAUDE_MAX_REVIEW_USD': '.07',
+                                           'CLAUDE_INPUT_USD_PER_MILLION': '1',
+                                           'CLAUDE_OUTPUT_USD_PER_MILLION': '5'}):
+                data = {**self.data, 'policies': policies(self.data['model'])}
+                client = NS(messages=NS(create=unittest.mock.Mock(side_effect=error)))
+                with patch('pr_review.review.backoff'), self.assertRaisesRegex(ReviewError, 'budget.cost'):
+                    analyze(data, client=client, repository_path=self.root)
+                self.assertEqual(client.messages.create.call_count, 1)
+
+    def test_default_sdk_and_preflight_timeouts_precede_watchdogs(self):
+        client, calls = self.mock_client()
+        client.messages.count_tokens = unittest.mock.Mock(return_value=NS(input_tokens=100))
+        with patch.dict(os.environ, {'ANTHROPIC_API_KEY': 'fixture'}), patch('anthropic.Anthropic', return_value=client) as sdk:
+            analyze(self.data, repository_path=self.root)
+        self.assertEqual(sdk.call_args.kwargs['timeout'], 50)
+        self.assertEqual(sdk.call_args.kwargs['max_retries'], 0)
+        self.assertEqual(client.messages.count_tokens.call_args.kwargs['timeout'], 20)
+
+    def test_total_deadline_interrupts_blocking_token_preflight(self):
+        from pr_review.runtime import bounded
+        import time
+        client, calls = self.mock_client()
+        client.messages.count_tokens = lambda **kwargs: time.sleep(2)
+        started = time.monotonic()
+        with self.assertRaisesRegex(ReviewError, 'budget.time'):
+            bounded(.1)(analyze)(self.data, client=client, repository_path=self.root)
+        self.assertLess(time.monotonic() - started, 1)
+        self.assertEqual(calls, [])
+
     def test_token_count_failure_closes_known_operation(self):
         client,calls=self.mock_client()
         client.messages.count_tokens=lambda **kwargs:(_ for _ in ()).throw(TimeoutError('sensitive'))
@@ -211,7 +334,7 @@ class V2(unittest.TestCase):
         self.assertEqual(calls,[])
     def test_deadline_reserves_final_call(self):
         client,calls=self.mock_client()
-        with patch('pr_review.v2.time',NS(monotonic=unittest.mock.Mock(side_effect=[0,241]))):
+        with patch('pr_review.review.time',NS(monotonic=unittest.mock.Mock(side_effect=[0,241]))):
             with self.assertRaises(ReviewError):analyze(self.data,client=client,repository_path=self.root)
         self.assertEqual(calls,[])
     def test_nondefault_model_reaches_preflight_and_generation_from_cli_environment(self):
@@ -271,6 +394,122 @@ class V2(unittest.TestCase):
             with self.assertRaisesRegex(ReviewError, 'budget.cost'):
                 analyze(data, client=client, repository_path=self.root)
             self.assertEqual(calls, [])
+
+    def test_diff_mode_reads_distant_hunks_and_marks_budget_omissions(self):
+        path = self.root / 'many.py'
+        original = [f'value_{n} = {n}\n' for n in range(600)]
+        path.write_text(''.join(original))
+        self.git('add', '.'); self.git('commit', '-m', 'large fixture')
+        self.github.base = self.git('rev-parse', 'HEAD')
+        original[1] = 'value_1 = -1\n'; original[501] = 'value_501 = -1\n'
+        path.write_text(''.join(original)); self.git('commit', '-am', 'two distant hunks')
+        self.github.head = self.git('rev-parse', 'HEAD')
+        for limit, expected in [('12', 'complete'), ('1', 'partial')]:
+            with patch.dict(os.environ, {'CLAUDE_MAX_TOOL_OPERATIONS': limit}):
+                data = prepare(self.github, 'fixture/repo', 1, self.root, mode='diff')
+                retained = []
+                original_context = ContextReader._source
+                def capture(reader, *args):
+                    source = original_context(reader, *args); retained.append(source); return source
+                with patch.object(ContextReader, '_source', capture):
+                    result = analyze(data, recorded=self.clean, repository_path=self.root)
+                self.assertEqual(result['coverage'], expected)
+                if expected == 'complete':
+                    for snapshot in ('before', 'after'):
+                        self.assertTrue(any(s['snapshot'] == snapshot and s['start_line'] <= 502 <= s['end_line'] for s in retained))
+                else:
+                    self.assertIn('tool operation limit reached', result['content']['limitations'])
+
+    def test_diff_mode_renamed_file_reads_original_before_path(self):
+        self.github.base = self.github.head
+        self.git('mv', 'contract.py', 'renamed.py')
+        (self.root / 'renamed.py').write_text('FIELD = "renamed"\n')
+        # A one-line complete rewrite is not considered a rename by Git. Keep
+        # stable content so the rename-with-edit path is actually exercised.
+        (self.root / 'stable.py').write_text(''.join(f'line_{n} = {n}\n' for n in range(30)))
+        self.git('add', '.'); self.git('commit', '-m', 'rename fixture')
+        self.github.base = self.git('rev-parse', 'HEAD')
+        self.git('mv', 'stable.py', 'stable-renamed.py')
+        p = self.root / 'stable-renamed.py'; p.write_text(p.read_text().replace('line_5 = 5', 'line_5 = 50'))
+        self.git('commit', '-am', 'rename with edit'); self.github.head = self.git('rev-parse', 'HEAD')
+        data = prepare(self.github, 'fixture/repo', 1, self.root, mode='diff')
+        self.assertIn('rename from stable.py', data['diff'])
+        result = analyze(data, recorded=self.clean, repository_path=self.root)
+        self.assertEqual(result['coverage'], 'complete')
+
+    def test_provider_usage_and_tool_protocol_fail_before_followup_calls(self):
+        for kind in ('negative-input', 'boolean-output', 'too-many-output', 'end-turn-tools', 'bad-id', 'bad-name', 'bad-arguments', 'unknown-block'):
+            with self.subTest(kind=kind):
+                client, calls = self.mock_client(); original = client.messages.create
+                def respond(**kwargs):
+                    response = original(**kwargs)
+                    if kind == 'negative-input': response.usage.input_tokens = -1
+                    elif kind == 'boolean-output': response.usage.output_tokens = True
+                    elif kind == 'too-many-output': response.usage.output_tokens = kwargs['max_tokens'] + 1
+                    elif kind == 'end-turn-tools': response.stop_reason = 'end_turn'
+                    elif kind == 'bad-id': response.content[0].id = []
+                    elif kind == 'bad-name': response.content[0].name = []
+                    elif kind == 'bad-arguments': response.content[0].input = []
+                    elif kind == 'unknown-block': response.content.append(NS(type='server_tool_use'))
+                    return response
+                client.messages.create = respond
+                with self.assertRaisesRegex(ReviewError, 'provider.'):
+                    analyze(self.data, client=client, repository_path=self.root)
+                self.assertEqual(len(calls), 1)
+
+    def test_zero_diff_does_not_scan_context_or_initialize_provider(self):
+        self.github.head = self.github.base
+        data = prepare(self.github, 'fixture/repo', 1, self.root, mode='context')
+        with patch.object(ContextReader, 'initial_context', side_effect=AssertionError('unexpected scan')), patch('anthropic.Anthropic') as sdk:
+            result = analyze(data, repository_path=self.root)
+        sdk.assert_not_called()
+        self.assertEqual(result['coverage'], 'complete')
+        self.assertEqual(result['calls'], 0)
+        self.assertFalse(result['live'])
+
+    def test_provenance_rejects_impossible_offline_usage_or_call_counts(self):
+        result = self.result()
+        for mutation in ({'live': True}, {'calls': 1}, {'usage': {'input_tokens': 1, 'output_tokens': 0}}):
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(ReviewError, 'result.provenance'):
+                validate_result({**result, **mutation}, self.data)
+
+    def test_tool_identifiers_are_unique_across_exploration_turns(self):
+        client, calls = self.mock_client()
+        original = client.messages.create
+        def respond(**kwargs):
+            response = original(**kwargs)
+            if len(calls) == 2:
+                response.stop_reason = 'tool_use'
+                response.content = [NS(type='tool_use', id='tool_1', name='read_file', input={'path': 'caller.py'})]
+            return response
+        client.messages.create = respond
+        with self.assertRaisesRegex(ReviewError, 'provider.tools: reused'):
+            analyze(self.data, client=client, repository_path=self.root)
+        self.assertEqual(len(calls), 2)
+
+    def test_preflight_count_increases_cost_reservation_before_generation(self):
+        # The real preflight is authoritative if it exceeds local framing.
+        with patch.dict(os.environ, {'CLAUDE_MAX_EXPLORATION_CALLS': '0',
+                                    'CLAUDE_MAX_REVIEW_USD': '.02',
+                                    'CLAUDE_INPUT_USD_PER_MILLION': '1',
+                                    'CLAUDE_OUTPUT_USD_PER_MILLION': '1'}):
+            data = {**self.data, 'policies': policies(self.data['model'])}
+            client, calls = self.mock_client()
+            client.messages.count_tokens = lambda **kwargs: NS(input_tokens=23000)
+            with self.assertRaisesRegex(ReviewError, 'budget.cost: counted'):
+                analyze(data, client=client, repository_path=self.root)
+            self.assertEqual(calls, [])
+
+    def test_every_executable_module_participates_in_cache_identity(self):
+        root = Path(__file__).resolve().parents[1] / 'src' / 'pr_review'
+        original = Path.read_text
+        baseline = policies()['implementation']
+        for name in ('core.py', 'service.py', 'diagnostics.py', 'context.py', 'cli.py'):
+            def changed(path, *args, **kwargs):
+                text = original(path, *args, **kwargs)
+                return text + '\n# policy regression\n' if path.parent == root and path.name == name else text
+            with self.subTest(name=name), patch.object(Path, 'read_text', changed):
+                self.assertNotEqual(policies()['implementation'], baseline)
 
     def test_provider_model_substitution_is_rejected_without_fallback(self):
         client, calls = self.mock_client()

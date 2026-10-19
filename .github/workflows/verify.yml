@@ -17,6 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
@@ -26,4 +27,34 @@ jobs:
           PYTHONPATH: src
         run: |
           python -m pip install -r requirements-lock.txt
+          python -m pip uninstall -y setuptools
           python scripts/run-tests.py
+      - name: Verify installed package and bundled review policy
+        run: |
+          python -m pip install --no-deps .
+          claude-pr-review show-config
+      - name: Run offline capability showcase
+        env:
+          SHOWCASE_BRANCH: ${{ github.head_ref }}
+          SHOWCASE_BASE: ${{ github.event.pull_request.base.sha }}
+          SHOWCASE_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          case "$SHOWCASE_BRANCH" in
+            codex/showcase-python-defect) scenario=broken ;;
+            codex/showcase-python-refactor) scenario=fixed ;;
+            codex/showcase-javascript-contract) scenario=js ;;
+            *) scenario=all ;;
+          esac
+          if [ "$scenario" = all ]; then
+            python scripts/showcase.py --output outputs/showcase/report.json --summary outputs/showcase/summary.md
+          else
+            python scripts/showcase.py --scenario "$scenario" --repository-path . --repository-name "$GITHUB_REPOSITORY" --base "$SHOWCASE_BASE" --head "$SHOWCASE_HEAD" --output outputs/showcase/report.json --summary outputs/showcase/summary.md
+          fi
+          cat outputs/showcase/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload offline showcase evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: offline-showcase-python-${{ matrix.python }}
+          path: outputs/showcase/
+          if-no-files-found: error
+          retention-days: 7

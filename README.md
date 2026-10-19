@@ -1,185 +1,145 @@
 # Claude PR Review
 
-A Python GitHub PR reviewer that explores related code through bounded read-only Git tools, validates evidence-linked findings, and fails a configurable severity check (high/critical by default). It addresses a limitation of diff-only review: a changed producer can break an unchanged consumer. This is a portfolio prototype with known security and correctness gaps, not a production security service. Merge blocking requires an independently configured required branch-protection rule.
+An AI-assisted GitHub pull request reviewer that analyzes code changes, produces findings with source references, and reports a configurable review check.
 
-## What it demonstrates
+*This portfolio proof of concept demonstrates AI-assisted code review. It is not a production service.*
 
-| Engineering capability | Implementation and evidence |
-| --- | --- |
-| Immutable Git snapshot reasoning | [Context reader](src/pr_review/context.py), [snapshot/context tests](tests/test-context.py) |
-| Structured Python contracts and evidence validation | [V2 contracts](src/pr_review/v2.py), [citation/gate regressions](tests/test-v2.py) |
-| SDK orchestration and failure handling | [Analysis/transport](src/pr_review/service.py), [installed SDK mock tests](tests/test-sdk.py) and [v2 protocol tests](tests/test-v2.py) |
-| CI privilege separation | [Review workflow](.github/workflows/claude-review.yml), [workflow checks](tests/test-workflow.py) |
-| Duplicate prevention and uncertain-write recovery | [Publisher](src/pr_review/service.py), [publisher tests](tests/test-service.py) |
-| Evaluation boundaries and diagnostic traceability | [Evaluation runner](scripts/evaluate-v2.py), [evaluation tests](tests/test-evaluation-v2.py), [diagnostics tests](tests/test-diagnostics.py) |
+## Quick Start
 
-## Representative outcome
-
-The [October 11 live smoke](docs/v2-live-verification-2026-10-11.md) introduced a Python producer key change that broke an unchanged consumer. A validated high finding linked immutable source evidence, appeared inline, and failed the severity gate. Correction passed with partial coverage and an unsupported low finding. An unchanged cache-only rerun reused the byte-identical result with **zero new model calls and no duplicate review**. A separate clean JavaScript refactor also passed with partial coverage. False positives and the first failed attempt remain recorded; these observations do not establish general precision/recall or better held-out quality.
-
-## Architecture
-
-```mermaid
-flowchart LR
-  PR[PR event and fixed Git snapshots] --> A[Prepare: metadata and policy hashes]
-  A --> T[Explore: bounded Git tools]
-  T --> M[Final structured review without tools]
-  M --> V[Validate evidence and coverage]
-  V --> R[Required result artifact]
-  R --> P[Trusted publisher: recheck Git and freshness]
-  P --> G[COMMENT review and severity gate]
-  A --> D[Separate diagnostic artifact]
-  T --> D
-  P --> D
-```
-
-Analysis has repository/PR read permissions and the provider secret; publication has PR write permission and no provider credential. Both execute base-commit scripts; PR code is data. Candidate tests run separately in Verify without provider secrets. `before` is merge base, `after` is PR head, and `target` is base tip. Tools list tracked files, search literal text and read bounded line ranges; they do not execute PR code. Application tool restrictions are enforced; model resistance to prompt injection is unverified. Same-repository workflow contributors must be trusted.
-
-## Engineering decisions
-
-| Decision | Benefit and trade-off |
-| --- | --- |
-| Fixed snapshots, metadata and policy hashes | Reproducible evidence and conservative cache invalidation; an edit requires new inputs |
-| Validate source IDs, blobs, hashes and ranges | Reject invented/mismatched citations; existence does not prove semantic correctness |
-| Separate coverage from severity | Valid partial reviews can pass without findings at the configured failing threshold; success is not full coverage |
-| Store compact result in review body | Cache reuse without transcripts; deleted reviews remove cache evidence |
-| One publication POST, then read-only reconciliation | Avoid duplicate writes on uncertain outcomes; unresolved ambiguity requires inspection |
-| Bound tools, requests and cost reservations | Constrain exploration and preserve a final-call allowance; may omit relevant code and leave unknown cost reserved |
-
-See [architecture and current limits](docs/v2-architecture.md). Fixed admission limits include 20 changed files and 60 KiB diff. Configurable defaults are four exploration calls plus one final call, twelve tool operations and 24,000 input tokens/request. See the [User Guide](#user-guide) for ranges. Generation uses 60-second Unix signal timers, SDK timeouts and zero retries; elapsed-time checks target five minutes but do not guarantee a total deadline. Actions has a separate ten-minute job timeout.
-
-## Prerequisites and verification
-
-Python **3.10+**, Git, and a Unix shell are required for these commands. Local evidence uses macOS/Python 3.10.1; GitHub Verify has exercised Ubuntu/Python 3.10 and 3.12. Unix signals are used by analysis; Windows support is unverified. Run from the project root. Dependency installation needs package access; tests and the replay below require no credentials or provider calls.
+Use Python **3.10+**, Git and a Unix shell. Run from the project root:
 
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements-lock.txt
+.venv/bin/python -m pip uninstall -y setuptools
 .venv/bin/python scripts/run-tests.py
-```
-
-The pinned build dependency has an unresolved dated advisory; see limitations before treating installation as a security endorsement.
-
-## User Guide
-
-### Where to change settings
-
-Open this repository on GitHub → **Settings → Secrets and variables → Actions → Variables → New repository variable** (or edit an existing one). Use **repository** variables: the workflow does not attach a GitHub Environment, so environment-scoped variables are not part of this interface. The workflow forwards the same settings to analysis and publication. No source edit or commit is needed for the variables below.
-
-| Repository variable | Default | Accepted value / effect |
-| --- | --- | --- |
-| `CLAUDE_MODEL` | `claude-haiku-4-5-20251001` | Concrete Claude model ID; no model allowlist or fallback substitution |
-| `CLAUDE_INPUT_USD_PER_MILLION` | Historical `1` for exact default model | Positive decimal input-token price; required for any other model |
-| `CLAUDE_OUTPUT_USD_PER_MILLION` | Historical `5` for exact default model | Positive decimal output-token price; required for any other model |
-| `CLAUDE_MAX_REVIEW_USD` | `0.20` context / `0.05` diff | Positive decimal per-review token-cost reservation ceiling |
-| `CLAUDE_REVIEW_MODE` | `context` | `context` explores related code; `diff` uses the baseline with the open MD-01 limitations |
-| `CLAUDE_FAIL_SEVERITY` | `high` | `low`, `medium`, `high`, `critical`, or `none`; findings at or above the threshold fail the gate |
-| `CLAUDE_MAX_EXPLORATION_CALLS` | `4` | Integer `0`–`8`; extra research calls before the one final call, context mode only |
-| `CLAUDE_MAX_TOOL_OPERATIONS` | `12` | Integer `1`–`100`; total tool operations per analysis |
-| `CLAUDE_MAX_INPUT_TOKENS` | `24000` | Integer `4096`–`128000`; request admission/token-count limit, not a guarantee the provider supports that size |
-| `CLAUDE_EXPLORATION_MAX_OUTPUT_TOKENS` | `2000` | Integer `1`–`16000`; output maximum per research call |
-| `CLAUDE_FINAL_MAX_OUTPUT_TOKENS` | `4000` | Integer `1`–`16000`; output maximum for final structured review |
-| `CLAUDE_CACHE_ONLY` | `false` | Exact `true` prohibits new model calls; cache miss fails. Use `false` for normal mode. |
-
-Leave optional variables blank or delete them to restore defaults. Enum values are lowercase; numeric control values must be decimal integers without signs/spaces. Invalid settings fail configuration validation before provider use. `none` disables only severity-based failure: invalid evidence/output, provider failures, stale inputs and publication errors still fail. It does not disable validation or approve a PR. Zero research calls skips exploration and reports partial coverage.
-
-### Change model, depth or gate policy
-
-For a new model, set its concrete `CLAUDE_MODEL` ID and both current token prices. Use an ID available to your account supporting token counting, tool use and JSON-schema output. The ID goes unchanged to provider requests; unsupported models/features and returned-model mismatch fail rather than silently selecting Haiku. Compatibility with every ID is not established by offline tests. See [provider structured-output requirements](https://platform.claude.com/docs/en/build-with-claude/structured-outputs), consulted October 11, 2026.
-
-Prices are operator-supplied estimates, not automatic price discovery. Verify them before paid use, even for the default model. A higher-cost model or deeper review may need a higher explicitly chosen `CLAUDE_MAX_REVIEW_USD`. Larger limits permit more work but cannot override the fixed time controls or guarantee complete coverage. The application reserves a worst-case final request before exploration; if the budget does not fit, it fails before sending that generation request. This is not an account-wide invoice guarantee.
-
-For less exploration, set `CLAUDE_MAX_EXPLORATION_CALLS=2` and `CLAUDE_MAX_TOOL_OPERATIONS=6`. To fail on medium as well as high/critical findings, set `CLAUDE_FAIL_SEVERITY=medium`. These changes affect application policy; enforced GitHub required checks are still necessary to prevent merging. Do not use a passing partial review as a complete-clean certificate.
-
-### Validate locally before a paid run
-
-From the project root, use the same environment variables as GitHub:
-
-```sh
 PYTHONPATH=src .venv/bin/python -m pr_review.cli show-config
-CLAUDE_MAX_EXPLORATION_CALLS=2 CLAUDE_MAX_TOOL_OPERATIONS=6 CLAUDE_FAIL_SEVERITY=medium PYTHONPATH=src .venv/bin/python -m pr_review.cli show-config
 ```
 
-`show-config` prints effective model, budget settings, controls, cache-only switch, prompt and policy hashes as JSON, requires no credentials and makes no network calls. Exit 0 means the local configuration/prompt is valid; exit 2 means invalid settings. A null budget `max_cost` means use the mode default in the table. This does not verify live model availability or current prices. The workflow also runs this validation before preparing a review.
+The runtime does not need setuptools; removing the virtual environment's optional bootstrap copy avoids retaining an unused build tool. Tests and `show-config` require no credentials or provider calls. For a local demonstration that produces a review payload without networking, follow the [offline walkthrough](docs/walkthrough.md). The [capability showcase](docs/showcase.md) exercises cross-file findings, a nonempty clean refactor and cache reuse using explicitly authored SDK responses.
 
-`prepare --model` and `prepare --mode` override the corresponding environment defaults for that preparation. Keep the same effective settings for analysis/publication. The evaluation tool prepares both modes; set the same model/controls when preparing, freezing and executing a comparison. See [evaluation guide](docs/v2-evaluation.md).
+To run on GitHub:
 
-### Edit the review instructions
+1. Create a `claude-review` GitHub Environment restricted to the `main` branch. Add `CLAUDE_REVIEW_PROVIDER_KEY` as an **environment secret**, then follow the [credential setup](docs/runtime-configuration.md#credential-and-workflow-trust).
+2. Set repository **Variables** for the model and current input/output token prices, and choose a per-review budget. Preview the same settings locally with `show-config`.
+3. Enable **Claude PR review** in Actions when ready to allow provider calls. Open or update an eligible same-repository PR targeting `main`.
+4. Read the posted review and **Claude review gate** check. Use the run's diagnostic artifacts to investigate failures.
+5. Configure required checks and required human approval in GitHub branch rules if merging must depend on both.
 
-The v2 prompt is [review-policy.md](src/pr_review/review-policy.md), a plain Markdown file shipped with the Python package. Edit it through GitHub's file editor or locally, review the change in a PR, and merge it into the base branch. No Python edit is needed. It must be nonempty UTF-8 and at most 32 KiB. The workflow reads the file from its trusted base checkout; a PR changing the prompt is reviewed with the prior base version. The new prompt applies after merge. The historical v1 prompt remains unchanged.
+Confirm the repository permits `pull_request_target` under its Actions event policy; some public repositories block it by default. Enabling the review workflow permits paid provider requests. Repository variables apply to new runs; keep them stable during a run because publication revalidates the policy.
 
-Instructions guide the model; application code still enforces schemas, evidence validation, allowed tools, snapshot freshness and fixed resource guardrails. Changing prose does not bypass these checks.
+### Key Settings
 
-### When changes take effect and where to inspect them
+| Repository variable | Purpose |
+| --- | --- |
+| `CLAUDE_MODEL` | Concrete Claude model ID; defaults to `claude-haiku-5-5`. |
+| `CLAUDE_INPUT_USD_PER_MILLION`, `CLAUDE_OUTPUT_USD_PER_MILLION` | Operator-supplied token prices; required for a non-default model. Verify current prices before paid use. |
+| `CLAUDE_MAX_REVIEW_USD` | Per-review token-cost reservation ceiling; defaults to `0.20` in context mode. |
+| `CLAUDE_FAIL_SEVERITY` | Findings at or above this severity fail the check; defaults to `high`. |
+| `CLAUDE_CACHE_ONLY` | Set to `true` to reuse an existing result without new model calls; a cache miss fails. |
 
-Variables apply to a new eligible workflow run and do not change existing reviews or an in-flight request. Keep them unchanged during a run: publication revalidates the configuration. Model, effective controls/prices, prompt and actual implementation participate in policy/cache identity. Changed review-policy settings require fresh preparation and prevent reuse of old results. The execution-only `CLAUDE_CACHE_ONLY` switch is deliberately excluded from identity so it can reuse the same review. Inspect `show-config` in the Actions console and the analysis diagnostic `configuration` event for effective settings (`mode` is the actual run mode; `controls.mode` is its preparation default); prompt/policy hashes appear in prepared input and manifests.
+For all settings, defaults, ranges and examples, see the [configuration reference](docs/runtime-configuration.md). To change the review instructions, edit [review-policy.md](src/pr_review/review-policy.md); a merged policy applies to subsequent reviews from that base branch.
 
-Store the provider key only in `ANTHROPIC_API_KEY` under **Secrets**, never Variables or the prompt. `GITHUB_TOKEN` is supplied automatically by Actions. Editing variables does not activate the disabled paid workflow. Workflow activation and live execution are separate operator actions.
+## Capabilities
 
-Fixed controls still include changed-file/diff size, allowed tool types and file exclusions, source validation, generation/time controls, zero SDK retries and job timeout. The separate historical evaluation aggregate ceiling is not controlled by these per-review settings. The known security, diff, deadline and dependency findings below remain open.
+### Core Capabilities
 
-## Complete offline v2 example
+- **Automated PR Review:** analyze proposed changes and publish findings with severity, explanation, source evidence and a suggested correction.
+- **GitHub Feedback:** attach inline comments to changed lines where possible and report a configurable severity check.
+- **Configurable Review Policy:** choose the Claude model, review instructions, failing severity and review budget.
 
-Prepare development fixtures, validate an **authored clean response**, and generate a GitHub payload without networking:
+### Extended Capabilities
 
-```sh
-.venv/bin/python scripts/evaluate-v2.py prepare --split development --output outputs/v2-demo
-PYTHONPATH=src .venv/bin/python -m pr_review.cli analyze --input outputs/v2-demo/development-02/context-input.json --repository-path outputs/v2-demo/development-02/repository --recorded evaluation/v2/authored-clean-response.json --output outputs/v2-demo/result.json --diagnostics-dir outputs/v2-demo/analyze-diagnostics
-PYTHONPATH=src .venv/bin/python -m pr_review.cli publish --input outputs/v2-demo/development-02/context-input.json --result outputs/v2-demo/result.json --dry-run --output outputs/v2-demo/payload.json --diagnostics-dir outputs/v2-demo/publish-diagnostics
+- **Related-Code Exploration:** follow dependencies beyond the diff using read-only search and file tools over fixed Git snapshots.
+- **Result Reuse:** recognize identical review inputs and reuse the result without another model call or duplicate GitHub review.
+- **Offline Replay:** validate an authored response and inspect the generated review payload locally.
+
+### Cross-Cutting Controls
+
+- **Bounded Execution:** enforce tool, token, cost and time limits, with up to three retries for transient request failures.
+- **Validated Evidence:** check structured findings, source identity, line ranges and snapshot freshness before publication.
+- **Traceability and Isolation:** correlate diagnostic events and source references while separating analysis credentials from publication permissions.
+
+## Main Use Case
+
+A developer opens or updates a PR. The reviewer examines the change and relevant surrounding code, then posts findings and a check result. A human assesses those findings alongside tests and their own review before deciding whether to merge.
+
+For example, changing a producer's response key can break a caller in an unchanged file. The reviewer can follow that relationship, cite the caller and attach a finding to the changed producer.
+
+## Architecture
+
+```mermaid
+flowchart TD
+  PR[Developer opens or updates PR] --> S[Prepare fixed Git snapshots and review policy]
+  S --> A[AI explores code with bounded read-only tools]
+  A --> V[Application validates output, evidence and coverage]
+  V --> P[Trusted publisher checks freshness and posts COMMENT review]
+  P --> G[Automatic severity and validity check]
+  G --> H[Human evaluates findings and reviews the PR]
+  H --> M[Human decides whether to merge]
+  B[GitHub branch rules: required check and required human approval] -. enforce .-> M
+  A -.-> D[Diagnostic artifacts]
+  V -.-> D
+  P -.-> D
 ```
 
-All three commands return **0**. Preparation creates three disposable Git repositories, paired `context-input.json`/`diff-input.json` and local-only `case-record.json` files. Development case 02 is a valid independent configuration change. Its snapshots and policy identities are generated locally, not hardcoded. Held-out labels are never model/example input.
+A `pull_request_target` workflow runs trusted orchestration. Analysis and publication run in separate jobs using trusted base-commit code. Analysis can read the repository and access the provider key. Publication can write a PR review and has no provider key. PR code is inspected as data; the review jobs do not execute it. Candidate tests run separately in Verify without provider credentials and with a read-only GitHub token. Repository administrators and maintainers who can change protected code/settings remain trusted.
 
-Inspect `result.json` and `payload.json`. Selected expected fields (synthetic replay, not live model output):
+## Human Oversight and AI Guardrails
 
-```json
-{
-  "version": 2,
-  "live": false,
-  "calls": 0,
-  "coverage": "complete",
-  "gate_outcome": "success",
-  "sources": [],
-  "usage": {"input_tokens": 0, "output_tokens": 0}
-}
-```
+The application automates analysis, validation, comments and the check result. It never submits an approving review or merges a PR. To make human review a mandatory gate, configure GitHub to require both **Claude review gate** and a human PR approval. These repository rules are separate from the workflow; a failed check alone does not prevent merging without an enforced rule.
 
-The payload has `event: "COMMENT"`, `commit_id` equal to the generated input's head, and `comments: []`. Empty sources are intentional: only cited metadata is retained, and this response has no findings. Diagnostic directories contain context, events, a manifest and empty request/response files for this replay; it does not create SDK calls.
+The model proposes findings; application code enforces tool permissions, evidence contracts and execution limits. A human decides whether a finding is valid, what to change and whether the PR is ready. A passing check is advisory evidence, not a replacement for that decision.
 
-For the supported evidence-linked finding path, [the v2 tests](tests/test-v2.py) construct a changed `contract.py` and unchanged `caller.py`. `finding()` derives a reference from the actual after-snapshot source, including its generated source ID/blob and lines 1–2. `test_body_only_finding_and_inline_anchor` verifies an immutable caller link and an inline RIGHT anchor at `contract.py:1`; `test_partial_success_high_still_fails` verifies the high gate. The [live finding](docs/v2-live-verification-2026-10-11.md#what-the-live-experiment-proved) supplies separate provider evidence. Neither authored examples nor mocks measure model accuracy.
+Invalid output, stale snapshots, exhausted budgets and expired deadlines stop the review. Partial coverage is reported explicitly. The model cannot change code or expand its own permissions; changes to policy, credentials, budgets and merge rules remain operator decisions.
 
-`analyze` returns 0 after valid result creation even for a high finding. `publish --dry-run` returns 0 for a passing gate, 1 for findings at the configured failing threshold, or 2 for invalid input/result. It never posts a review. Recorded results cannot be published live. Fixture preparation refuses an existing case directory: for another run choose a fresh output path and use it consistently; do not delete real work. Generated outputs remain under ignored `outputs/`. Source edits can change policy hashes: regenerate inputs after such edits.
+## Security and Data Handling
 
-## Verification layers
+| Control | How it is applied |
+| --- | --- |
+| Restricted code access | Context tools read fixed, tracked Git blobs; deny credential-oriented paths, binary/non-regular objects and selected generated files; bound file sizes and line ranges. |
+| Sensitive-content checks | Recognized token/private-key patterns and matching runtime-secret values are rejected in context reads. Input validation also checks recognized sensitive patterns before analysis. |
+| Enforced tool permissions | The model can list files, search literal text and read bounded ranges. It cannot execute commands, modify files or choose arbitrary network tools. Repository text is treated as untrusted input. |
+| Limited credentials | Trusted-base workflow code separates provider access from PR writes; checkout credentials are not persisted. Scope the provider secret to the restricted `claude-review` environment. |
+| Validated publication | Schema, source identity, line ranges, policy identity and current PR snapshots are checked before a review is accepted for publication. |
+| Bounded diagnostic retention | Traces apply pattern-based redaction, a 10 MiB bundle cap and seven-day Actions artifact retention. |
 
-| Layer | What it establishes | Limit |
+The diff and selected source text are sent to the configured provider. Restricted changed paths are rejected on both sides of the diff before analysis. Pattern checks/redaction are not comprehensive secret detection. Use only repository content cleared for external processing, and inspect retained diagnostics before sharing them. Tool restrictions limit what the model can do; they do not establish immunity to prompt injection.
+
+## Engineering Decisions and Harness
+
+The harness surrounds the model with deterministic checks and execution controls.
+
+| Problem | Decision | Why this approach |
 | --- | --- | --- |
-| Deterministic Git/contract/CLI tests | Snapshot identity, evidence validation, gating, races, cache and payload behavior | Authored/fake responses do not measure model accuracy |
-| Installed SDK with in-memory HTTP | Serialization, tool-use pairing, final schema, errors and zero retry | No provider availability or live quality claim |
-| Development/held-out evaluation tooling | Separate labels, sealed policies, conservative ledger and adjudication reports | Paired held-out study and independent oracle review remain unperformed |
-| Historical live v1 and v2 smoke | Actual publication, defect/correction observations and cache reuse | Small sample, partial coverage, false positives; merge enforcement unverified |
+| A branch can change while a review is running | Bind input and evidence to immutable Git snapshots; recheck freshness before and after publication | Findings remain attributable to specific code, and a stale result fails the check. |
+| Model output can contain malformed findings or invented citations | Require structured output and validate cited blobs, source IDs and line ranges | Invalid output cannot become an accepted review. Human review still determines whether an interpretation is correct. |
+| Exploration can consume unpredictable resources | Bound files, tools, requests, tokens and cost reservations; reserve capacity for the final response | Keep review effort within explicit limits and report omissions as partial coverage. |
+| Transient failures and stalled operations need controlled recovery | Allow up to three retries for transient read and generation failures, with backoff, per-attempt cost reservations, operation timeouts and a total analysis deadline | Recover from temporary failures while bounding execution and accounting for uncertain paid attempts. See [runtime details](docs/architecture.md#execution-harness). |
+| An uncertain publication response can cause duplicate comments | Attempt one review write, then reconcile through read-only requests | Avoid a blind second POST; unresolved outcomes require inspection. |
+| Repeated PR events can repeat paid work | Bind cached results to snapshots, metadata, model and policy hashes | Reuse an identical result while invalidating it when review inputs change. |
+| A passing check can be mistaken for complete coverage | Track coverage separately from severity | A partial review visibly reports **INCOMPLETE REVIEW**, even when no finding reaches the failing threshold. |
+| Failures need investigation without another model call | Record correlated events, sanitized request/response data and source context | Support offline diagnosis and replay; manifests identify missing, redacted or truncated records. |
 
-## Repository map and guides
+Implementation: [context tools](src/pr_review/context.py), [review orchestration and publication](src/pr_review/service.py), [diagnostics](src/pr_review/diagnostics.py). See the [architecture reference](docs/architecture.md) for detailed contracts.
 
-- `src/pr_review/`: contracts, context tools, orchestration, publication, CLI and diagnostics.
-- `tests/`: deterministic regressions and SDK transport mocks; `scripts/run-tests.py` is the test entry point.
-- `evaluation/`: authored v1 replay and v2 synthetic cases with separate labels; `scripts/evaluate-v2.py` prepares/seals/reports and has a separately authorized paid adapter.
-- `examples/context-smoke/`: independent live-smoke producer/consumer fixtures; `.github/workflows/`: Verify and review jobs.
-- [Architecture](docs/v2-architecture.md), [offline walkthrough](docs/walkthrough.md), [evaluation](docs/v2-evaluation.md), [troubleshooting](docs/v2-troubleshooting.md).
-- [Development history](docs/development-history.md), [v1 results](docs/live-verification-2026-10-05.md), [v2 results](docs/v2-live-verification-2026-10-11.md), [historical local delivery](docs/v2-delivery.md), [operator delivery](docs/github-delivery.md), [historical smoke plan](docs/v2-smoke-plan.md).
+## Operational Limits
 
-## Limitations
+The proof of concept deliberately limits its integration surface and review effort: same-repository PRs, read-only tools and bounded resource use keep the workflow focused and inspectable. The following boundaries matter when running it.
 
-- **Open M-01:** context filename/pattern/runtime-secret checks are bounded. The raw diff bypasses context path exclusions; credential URLs and quoted serialized password fields can reach provider token counting, and some can survive diagnostics. Redaction does not prove no raw sensitive data is transmitted. Do not rely on this tool to protect secrets.
-- **Open MD-01:** diff mode reads a continuous displayed-line span capped at 200 lines per side, including unchanged gaps and omitting later citable hunks. It can incorrectly report complete coverage. Do not claim a valid exact hunk-only quality comparison.
-- **Open MD-02:** token-count preflight and blocking Git reads can exceed the intended total deadline.
-- **Open MD-03:** setuptools 80.9.0 has [GHSA-h35f-9h28-mq5c](https://github.com/pypa/setuptools/security/advisories/GHSA-h35f-9h28-mq5c), identified October 11, 2026, concerning sdist filename exclusion on macOS. No reviewer-runtime exploit was established; pins are unchanged in this documentation pass.
-- **L-01 follow-up / open L-04:** selected operational limits now share validated configuration; fixed timer literals still need consolidation. Incomplete `.env` variant ignore defaults remain uncorrected.
-- Draft, fork, bot and non-main PRs have no coverage. Missing/denied/truncated context remains a limitation. Evidence integrity does not establish correctness; valid partial reviews below the configured failing threshold pass with an **INCOMPLETE REVIEW** warning.
-- Traces use bounded redaction and a 10 MiB bundle cap, with seven-day Actions retention. Redaction, truncation, interruption or upload failure prevent an exact completeness claim. Hard runner loss is best effort.
-- Cost reservations, using operator-configured rates, constrain this application's attempted model-token use; they are not an account-wide invoice guarantee. Historical Haiku pricing and personal pilot allocations are dated experiment assumptions, not current prices or authorization. New paid work requires explicit operator authorization and pricing verification.
-- The paid workflow was disabled after the October 11 bounded smoke; no ongoing paid use is enabled. Public release readiness, general accuracy and enforced private merge blocking remain unverified. No PR approval or merge is automated.
+- The workflow covers non-draft, non-bot, same-repository PRs targeting `main`. Forks and other branches are outside its review coverage.
+- Input admission allows ordinary textual patches, up to 20 changed files and a 60 KiB diff. Binary, mode-only, metadata-only, submodule and quoted-path changes fail admission. File/tool/token/time limits can produce partial coverage; a passing check is not a complete-clean certificate.
+- Context mode is the main review path. The optional diff mode supplies bounded changed hunks without related-code exploration; omissions are reported as partial coverage.
+- Cost controls use configured prices and conservative reservations; they are not an account-wide billing cap. An interrupted provider request may have unknown usage.
+- Analysis uses Unix signals; Windows execution is unverified. Actions also imposes a ten-minute timeout per job.
 
-## Contribution and project boundary
+## Verification and Further Reading
 
-Julia directed project scope and bounded verification/release decisions, including the defect/correction/clean scenarios and the review of limitations. Implementation and repository verification were AI-assisted. The [development history](docs/development-history.md) and dated live reports identify delivered behavior and observed limits. Repository quality does not establish unaided Python implementation or independent interview explanation.
+Offline tests cover Git snapshots, tool restrictions, evidence validation, SDK transport behavior, configuration, gating, cache reuse and publication races. Authored replay responses and transport mocks verify application contracts; broader model accuracy remains unmeasured.
+
+- [Capability Showcase](docs/showcase.md) — synthetic SDK transport, real Git evidence and exact cache-rerun checks.
+- [Offline Walkthrough](docs/walkthrough.md) — run the local replay and inspect its output.
+- [Configuration](docs/runtime-configuration.md) — model, budget, depth and gate controls.
+- [Troubleshooting](docs/troubleshooting.md) — diagnose a run from its artifacts.
+- [Architecture](docs/architecture.md) — contracts, safeguards and implementation boundaries.
+- [Evaluation](docs/evaluation.md) — synthetic cases, separate labels and comparison tooling.

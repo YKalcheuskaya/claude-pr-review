@@ -1,4 +1,4 @@
-"""Offline integration checks for user-controlled v2 runtime settings."""
+"""Offline integration checks for user-controlled runtime settings."""
 import contextlib
 import copy
 import io
@@ -15,7 +15,7 @@ from pr_review.cli import main
 from pr_review.context import ContextReader
 from pr_review.core import ReviewError, digest, gate, validate_result
 from pr_review.service import analyze, prepare
-from pr_review.v2 import policies, source_metadata, system_prompt
+from pr_review.review import policies, source_metadata, system_prompt
 
 
 class FixtureGithub:
@@ -155,7 +155,7 @@ class RuntimeConfiguration(unittest.TestCase):
     def test_prompt_and_controls_change_prepared_cache_identity(self):
         data = self.prepared()
         prompt = system_prompt()
-        with patch('pr_review.v2.system_prompt', return_value=prompt + '\nAdditional review focus.'):
+        with patch('pr_review.review.system_prompt', return_value=prompt + '\nAdditional review focus.'):
             changed = self.prepared()
             self.assertNotEqual(data['policies']['prompt'], changed['policies']['prompt'])
             self.assertNotEqual(digest(data), digest(changed))

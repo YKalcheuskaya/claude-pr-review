@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from pr_review.config import effective_config, review_budget, review_controls, selected_model, cache_only_mode
+from pr_review.runtime import TIMERS
 from pr_review.core import DEFAULT_MODEL, ReviewError
 
 
@@ -13,9 +14,15 @@ class ReviewBudget(unittest.TestCase):
         self.environment.start()
         self.addCleanup(self.environment.stop)
 
-    def test_tested_default_prices_and_existing_mode_ceiling(self):
+    def test_conservative_default_prices_and_existing_mode_ceiling(self):
         self.assertEqual(review_budget(DEFAULT_MODEL), {
-            "input_rate": "1", "output_rate": "5", "max_cost": None})
+            "input_rate": "0.5", "output_rate": "2.5", "max_cost": None})
+
+    def test_long_input_limit_retains_conservative_haiku_price_envelope(self):
+        self.assertEqual(selected_model(), 'claude-haiku-5-5')
+        with patch.dict(os.environ, {'CLAUDE_MAX_INPUT_TOKENS': '128000'}):
+            self.assertEqual(effective_config()['budget'], {
+                'input_rate': '0.5', 'output_rate': '2.5', 'max_cost': None})
 
     def test_any_selected_model_accepts_explicit_prices_and_ceiling(self):
         with patch.dict(os.environ, {
@@ -47,12 +54,18 @@ class ReviewBudget(unittest.TestCase):
                         review_budget(DEFAULT_MODEL)
                     self.assertEqual(caught.exception.code, "configuration.invalid_budget")
 
+    def test_extreme_decimal_representations_fail_without_materializing_them(self):
+        for value in ('1e999999999', '1e-999999999', '1' * 129, '0.' + '0' * 128 + '1'):
+            with self.subTest(value=value), patch.dict(os.environ, {'CLAUDE_MAX_REVIEW_USD': value}):
+                with self.assertRaises(ReviewError):
+                    review_budget(DEFAULT_MODEL)
+
     def test_blank_actions_variables_are_unset(self):
         with patch.dict(os.environ, {"CLAUDE_INPUT_USD_PER_MILLION": "",
                                     "CLAUDE_OUTPUT_USD_PER_MILLION": "  ",
                                     "CLAUDE_MAX_REVIEW_USD": "\t"}):
             self.assertEqual(review_budget(DEFAULT_MODEL), {
-                "input_rate": "1", "output_rate": "5", "max_cost": None})
+                "input_rate": "0.5", "output_rate": "2.5", "max_cost": None})
             with self.assertRaisesRegex(ReviewError, "configuration:.*requires both"):
                 review_budget("user-selected-model")
 
@@ -61,7 +74,7 @@ class ReviewBudget(unittest.TestCase):
         with patch.dict(os.environ, {"CLAUDE_INPUT_USD_PER_MILLION": "2",
                                     "CLAUDE_MAX_REVIEW_USD": "0.3"}):
             self.assertEqual(review_budget(DEFAULT_MODEL), {
-                "input_rate": "2", "output_rate": "5", "max_cost": "0.3"})
+                "input_rate": "2", "output_rate": "2.5", "max_cost": "0.3"})
         self.assertEqual(review_budget(DEFAULT_MODEL), original)
 
     def test_equivalent_prices_have_identical_identity(self):
@@ -163,7 +176,8 @@ class ReviewControls(unittest.TestCase):
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "must-not-appear", "GITHUB_TOKEN": "also-secret"}):
             config = effective_config()
         self.assertEqual(config, {"model": DEFAULT_MODEL,
-                                  "budget": review_budget(DEFAULT_MODEL), "controls": review_controls()})
+                                  "budget": review_budget(DEFAULT_MODEL), "controls": review_controls(),
+                                  "timers": TIMERS})
         serialized = json.dumps(config)
         self.assertNotIn("secret", serialized)
         self.assertNotIn("must-not-appear", serialized)
@@ -183,7 +197,7 @@ class ReviewControls(unittest.TestCase):
 
 class CacheOnlyControl(unittest.TestCase):
     def test_switch_is_strict_without_changing_policy_identity(self):
-        from pr_review.v2 import policies
+        from pr_review.review import policies
         with patch.dict(os.environ, {}, clear=True):
             original = policies()
             self.assertFalse(cache_only_mode())

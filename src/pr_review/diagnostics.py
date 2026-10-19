@@ -20,28 +20,14 @@ import uuid
 MAX_BUNDLE_BYTES = 10 * 1024 * 1024
 _METADATA_RESERVE = 256 * 1024
 _REDACTED = "[REDACTED]"
-_SENSITIVE = re.compile(r"(?:authorization|cookie|password|passwd|secret|api[-_]?key|access[-_]?token|refresh[-_]?token|github[-_]?token|anthropic[-_]?api[-_]?key|private[-_]?key)", re.I)
-_PATTERNS = (
-    re.compile(r"-----BEGIN (?:[A-Z ]*PRIVATE KEY)-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)"),
-    re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,}|sk-ant-[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16})\b"),
-    re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9+/_.=-]+"),
-    re.compile(r"(?i)(\b(?:password|passwd|secret|api[-_]?key|access[-_]?token|refresh[-_]?token|github[-_]?token|anthropic[-_]?api[-_]?key)\b\s*[=:]\s*)[\"']?[^\s\"',;}]+"),
-    re.compile(r"(https?://)[^/\s:@]+:[^/\s@]+@", re.I),
-)
+from .security import SENSITIVE_KEY as _SENSITIVE, redact
 
 
 def sanitize(value):
     """Return sanitized data; unknown objects become type names, never reprs."""
-    secrets = sorted((os.environ.get(key, "") for key in ("GITHUB_TOKEN", "ANTHROPIC_API_KEY")), key=len, reverse=True)
-
     def clean(item):
         if isinstance(item, str):
-            for secret in secrets:
-                if secret:
-                    item = item.replace(secret, _REDACTED)
-            for pattern in _PATTERNS:
-                item = pattern.sub(_REDACTED, item)
-            return item
+            return redact(item)
         if isinstance(item, dict):
             return {clean(str(key)) if isinstance(key, (str, int)) else "unknown-key":
                     _REDACTED if _SENSITIVE.search(str(key)) else clean(val)
