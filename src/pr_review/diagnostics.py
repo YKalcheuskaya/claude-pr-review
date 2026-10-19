@@ -29,6 +29,10 @@ def sanitize(value):
         if isinstance(item, str):
             return redact(item)
         if isinstance(item, dict):
+            if item.get("type") in ("thinking", "redacted_thinking"):
+                # Signed/opaque blocks remain in memory for the SDK protocol,
+                # but reasoning and its replay credentials never enter a sink.
+                return {"type": item["type"], "omitted": True}
             return {clean(str(key)) if isinstance(key, (str, int)) else "unknown-key":
                     _REDACTED if _SENSITIVE.search(str(key)) else clean(val)
                     for key, val in item.items() if isinstance(key, (str, int))}
