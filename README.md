@@ -66,6 +66,8 @@ A developer opens or updates a PR. The reviewer examines the change and relevant
 
 For example, changing a producer's response key can break a caller in an unchanged file. The reviewer can follow that relationship, cite the caller and attach a finding to the changed producer.
 
+Inspect the [Python defect PR](https://github.com/YKalcheuskaya/claude-pr-review/pull/10), [nonempty Python refactor PR](https://github.com/YKalcheuskaya/claude-pr-review/pull/11) and [JavaScript defect PR](https://github.com/YKalcheuskaya/claude-pr-review/pull/12). Their CI reports use explicitly authored SDK responses with real Git evidence; the [showcase guide](docs/showcase.md#github-examples) explains the observed gates, partial coverage and cache checks.
+
 ## Architecture
 
 ```mermaid

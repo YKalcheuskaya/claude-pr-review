@@ -4,6 +4,18 @@ This showcase runs the actual review harness against real Git snapshots and the 
 
 No credentials are required. Every SDK HTTP request terminates inside `httpx2.MockTransport`; a local GitHub adapter stores reviews in memory. The script does not contact GitHub, call a provider, publish a review or execute the example code.
 
+## GitHub Examples
+
+Each PR changes one producer while its caller remains unchanged. Keep these examples unmerged. Their Verify summaries and `offline-showcase-python-*` artifacts reproduce the actual immutable PR snapshots with authored SDK responses.
+
+| Example PR | Expected Severity Outcome | Observed Repository Coverage | Evidence |
+| --- | --- | --- | --- |
+| [Python Contract Regression #10](https://github.com/YKalcheuskaya/claude-pr-review/pull/10) | failure | partial | One high finding, inline producer position and unchanged Python caller citation |
+| [Nonempty Python Refactor #11](https://github.com/YKalcheuskaya/claude-pr-review/pull/11) | success | partial | A real code change preserves the response key; no authored findings |
+| [JavaScript Contract Regression #12](https://github.com/YKalcheuskaya/claude-pr-review/pull/12) | failure | partial | A distinct caller fails when a response property disappears |
+
+All three preserve the identical result on a cache-only rerun with zero new requests or local review writes. Repository coverage is partial because the bounded initial-context policy omits the larger root README; that limitation is surfaced in every report. The small standalone scenarios below have complete coverage. These are harness demonstrations with synthetic answers, not live model results; green Verify means the expected behavior was reproduced.
+
 ## Run All Scenarios
 
 After installing the locked dependencies from the [Quick Start](../README.md#quick-start), run from the project root:
