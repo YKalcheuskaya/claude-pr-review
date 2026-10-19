@@ -122,14 +122,22 @@ class Review(unittest.TestCase):
     def test_haiku_adaptive_thinking_survives_tool_replay_and_final_text_parsing(self):
         client, calls = self.mock_client()
         original = client.messages.create
-        thinking = NS(type='thinking', thinking='', signature='fixture-signed-thinking')
+        thinking = NS(type='thinking', thinking='fixture-private-reasoning', signature='fixture-signed-thinking')
         redacted = NS(type='redacted_thinking', data='fixture-opaque-block')
         def create(**kwargs):
             response = original(**kwargs)
             response.content[:0] = [thinking, redacted]
             return response
         client.messages.create = create
-        result = analyze(self.data, client=client, repository_path=self.root)
+        with contextlib.redirect_stdout(io.StringIO()) as console:
+            diagnostics = Diagnostics(self.root / 'thinking-diagnostics', 'analyze')
+            result = analyze(self.data, client=client, repository_path=self.root, diagnostics=diagnostics)
+            manifest = diagnostics.finalize('success')
+        retained = console.getvalue() + ''.join(path.read_text() for path in (self.root / 'thinking-diagnostics').iterdir())
+        for canary in ('fixture-private-reasoning', 'fixture-signed-thinking', 'fixture-opaque-block'):
+            self.assertNotIn(canary, retained)
+        self.assertTrue(manifest['redacted'])
+        self.assertFalse(manifest['complete'])
         self.assertEqual(result['content']['summary'], self.clean['summary'])
         replay = calls[1]['messages'][1]['content']
         self.assertEqual(replay[:2], [vars(thinking), vars(redacted)])
