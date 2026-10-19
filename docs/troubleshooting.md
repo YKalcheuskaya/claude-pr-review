@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Start with the existing trace to identify why the review stopped. Diagnostics record observable application interactions; they do not reveal hidden model reasoning or establish that a finding is correct.
+Start with the existing trace to identify why the review stopped. Diagnostics record observable application interactions. Thinking blocks, replay signatures and opaque thinking data are omitted from every retained request/response; they remain in memory only when needed for the SDK protocol. Omission marks the trace as redacted and incomplete. Diagnostics do not establish that a finding is correct.
 
 ## Find the Evidence
 
