@@ -1,2 +1,3 @@
 def summarize(value):
-    return {"total": value}
+    total = value
+    return {"total": total}
