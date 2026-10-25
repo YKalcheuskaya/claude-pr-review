@@ -5,12 +5,20 @@ import re
 DENIED_DIRECTORIES = [".git", ".aws", ".ssh", ".venv", "venv", "node_modules", "vendor", "dist", "build", "target", "coverage", "__pycache__", ".next", ".nuxt", "generated"]
 DENIED_SUFFIXES = [".pem", ".key", ".p12", ".pfx", ".keystore", ".pyc", ".min.js", ".map", ".lock"]
 DENIED_NAMES = ["credentials", "credentials.json", "secrets.json", "secrets.yaml", "secrets.yml", "id_rsa", "id_ed25519", ".npmrc", ".netrc", ".pypirc"]
-SENSITIVE_KEY = re.compile(r"(?:authorization|cookie|password|passwd|secret|api[-_]?key|access[-_]?token|refresh[-_]?token|github[-_]?token|anthropic[-_]?api[-_]?key|private[-_]?key)", re.I)
+_HEADER_NAME = r"(?:authorization|(?:set[-_])?cookie)"
+_CREDENTIAL_NAME = r"(?:password|passwd|secret(?:[-_]access[-_]key)?|api[-_]?key|access[-_]?token|refresh[-_]?token|github[-_]?token|anthropic[-_]?api[-_]?key|private[-_]?key)"
+# Structured diagnostics deliberately match name components conservatively.
+# Text admission additionally requires an assignment and a complete name ending.
+SENSITIVE_KEY = re.compile(rf"(?:{_HEADER_NAME}|{_CREDENTIAL_NAME})", re.I)
 PATTERNS = (
     re.compile(r"-----BEGIN (?:[A-Z ]*PRIVATE KEY)-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)"),
     re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9_]{8,}|github_pat_[A-Za-z0-9_]{8,}|sk-ant-[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{20,}|AKIA[A-Z0-9]{16})\b"),
     re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9+/_.=-]+"),
-    re.compile(r'''(?i)\b(?:password|passwd|secret|api[-_]?key|access[-_]?token|refresh[-_]?token|github[-_]?token|anthropic[-_]?api[-_]?key)\b["']?\s*[=:]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s"',;}]+)'''),
+    # Consume the full header line, including spaces, quotes and later cookies.
+    re.compile(rf'''(?i)(?<![a-z0-9_]){_HEADER_NAME}(?![a-z0-9_])["']?\s*[=:]\s*[^\r\n]+'''),
+    # Allow a compound prefix (DB_PASSWORD), without treating password_length
+    # as a credential assignment. No unbounded prefix scan is needed.
+    re.compile(rf'''(?i)(?<![a-z0-9]){_CREDENTIAL_NAME}(?![a-z0-9_])["']?\s*[=:]\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s"',;}}]+)'''),
     re.compile(r"\b[a-z][a-z0-9+.-]{0,31}://[^/\s:@]+:[^/\s@]+@", re.I),
 )
 

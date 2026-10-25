@@ -269,11 +269,7 @@ def analyze(data, github=None, recorded=None, client=None, repository_path='.', 
             client = Anthropic(api_key=key, timeout=TIMERS['generation_http'], max_retries=0)
     def pack():
         return dict(diff=data['diff'], metadata=data['metadata'], sources=list(reader.sources), limitations=list(reader.limitations))
-    def call(messages, final=False):
-        nonlocal calls, reserved_cost
-        if time.monotonic()-started > TIMERS['analysis'] - TIMERS['generation']:
-            raise ReviewError('budget.time: final-call reserve exhausted')
-        if github: assert_current(github,data)
+    def request_kwargs(messages, final=False):
         kwargs = dict(model=data['model'],system=prompt,messages=messages,max_tokens=controls['final_output'] if final else controls['research_output'])
         # Haiku 5.5 defaults to adaptive thinking; low effort leaves room for
         # useful output inside the bounded exploration/final output budgets.
@@ -281,9 +277,18 @@ def analyze(data, github=None, recorded=None, client=None, repository_path='.', 
             kwargs['output_config'] = {'effort': 'low'}
         if final: kwargs.setdefault('output_config', {})['format'] = {'type':'json_schema','schema':schema()}
         else: kwargs['tools'] = TOOLS
+        return kwargs
+    def input_bound(kwargs):
         # Conservative UTF-8 byte bound: tokenization cannot use more tokens than
         # bytes plus framing. Count endpoint is deliberately not a paid model call.
-        upper = len(json.dumps(kwargs,ensure_ascii=False).encode()) + 1024
+        return len(json.dumps(kwargs,ensure_ascii=False).encode()) + 1024
+    def call(messages, final=False):
+        nonlocal calls, reserved_cost
+        if time.monotonic()-started > TIMERS['analysis'] - TIMERS['generation']:
+            raise ReviewError('budget.time: final-call reserve exhausted')
+        if github: assert_current(github,data)
+        kwargs = request_kwargs(messages, final)
+        upper = input_bound(kwargs)
         if upper > controls['input_tokens']:
             raise ReviewError('budget.input: conservative input bound exceeds configured token limit')
         # Reserve worst permitted final request before each exploration call.
@@ -412,14 +417,17 @@ def analyze(data, github=None, recorded=None, client=None, repository_path='.', 
                 messages.append(dict(role='user',content=replies))
                 if step == controls['research_calls'] - 1:
                     reader.limitations.append(f"{controls['research_calls']} exploration calls reached; further exploration unavailable.")
-        # Final context trimmed explicitly, never silently. Preserve evidence IDs.
-        while len(json.dumps(pack()).encode()) + len(prompt.encode()) + len(json.dumps(schema()).encode()) + 2048 > controls['input_tokens'] and reader.sources:
+        def final_messages():
+            return [dict(role='user',content=json.dumps(pack()))]
+        # Fit the same complete request used by admission, including nested JSON
+        # escaping and the omission notice added after removing a source.
+        while input_bound(request_kwargs(final_messages(), final=True)) > controls['input_tokens'] and reader.sources:
             reader.sources.pop()
             if 'Final context input budget reached; some sources omitted.' not in reader.limitations:
                 reader.limitations.append('Final context input budget reached; some sources omitted.')
         # Rebuild from bounded sources, omitting the exploration transcript so the
         # final request has one explicit evidence set for citation validation.
-        response, blocks = call([dict(role='user',content=json.dumps(pack()))],final=True)
+        response, blocks = call(final_messages(),final=True)
         if response.stop_reason != 'end_turn':
             raise ReviewError('provider.stop: no valid final response')
         try:

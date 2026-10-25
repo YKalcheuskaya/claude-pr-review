@@ -1,0 +1,3 @@
+# Test-only YAML parsing; runtime dependencies remain in their existing lock.
+-r requirements-lock.txt
+PyYAML==6.0.3

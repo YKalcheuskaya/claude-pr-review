@@ -4,19 +4,21 @@ An AI-assisted GitHub pull request reviewer that analyzes code changes, produces
 
 *This portfolio proof of concept demonstrates AI-assisted code review. It is not a production service.*
 
+**Verification status:** the offline harness and local provider path have been exercised separately. The three real local model samples produced mixed results, including a false high-severity finding. Paid GitHub review is currently disabled; hosted paid integration acceptance remains deferred. See the [verification record](docs/verification.md) for dated results and limits.
+
 ## Quick Start
 
 Use Python **3.10+**, Git and a Unix shell. Run from the project root:
 
 ```sh
 python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements-lock.txt
+.venv/bin/python -m pip install -r requirements-test.txt
 .venv/bin/python -m pip uninstall -y setuptools
 .venv/bin/python scripts/run-tests.py
 PYTHONPATH=src .venv/bin/python -m pr_review.cli show-config
 ```
 
-The runtime does not need setuptools; removing the virtual environment's optional bootstrap copy avoids retaining an unused build tool. Tests and `show-config` require no credentials or provider calls. For a local demonstration that produces a review payload without networking, follow the [offline walkthrough](docs/walkthrough.md). The [capability showcase](docs/showcase.md) exercises cross-file findings, a nonempty clean refactor and cache reuse using explicitly authored SDK responses.
+The test requirements include the runtime lock plus PyYAML for structural workflow checks. The review runtime installs only `requirements-lock.txt`. The runtime does not need setuptools; removing the virtual environment's optional bootstrap copy avoids retaining an unused build tool. Tests and `show-config` require no credentials or provider calls. For a local demonstration that produces a review payload without networking, follow the [offline walkthrough](docs/walkthrough.md). The [capability showcase](docs/showcase.md) exercises cross-file findings, a nonempty clean refactor and cache reuse using explicitly authored SDK responses.
 
 To run on GitHub:
 

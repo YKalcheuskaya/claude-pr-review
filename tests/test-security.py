@@ -17,6 +17,30 @@ from pr_review.security import sensitive
 from pr_review.runtime import deadline
 from pr_review.service import analyze, prepare
 from pr_review.context import ContextReader
+from pr_review.review import validate_input
+
+
+SENSITIVE_FIELDS = (
+    ('Cookie', 'session=cookie-first-canary; other=cookie-last-canary'),
+    ('Set-Cookie', 'session=set-cookie-canary; Path=/; HttpOnly'),
+    ('cOoKiE', 'session=mixed-cookie-canary; other=mixed-last-canary'),
+    ('Cookie', '"quoted-first-canary"; other=quoted-last-canary'),
+    ('Authorization', 'Custom custom-auth-canary'),
+    ('DB_PASSWORD', 'db-password-canary'),
+    ('CLIENT_SECRET', 'client-secret-canary'),
+    ('AWS_SECRET_ACCESS_KEY', 'aws-secret-canary'),
+    ('PRIVATE_KEY', 'private-key-canary'),
+    ('db-password', 'hyphen-password-canary'),
+    ('client_secret', 'lower-secret-canary'),
+    ('aws_secret_access_key', 'lower-aws-canary'),
+)
+
+
+def sensitive_text_forms(name, value):
+    structured = {name: value}
+    return (f'{name}: {value}', f'{name} = "{value}"', f"'{name}': '{value}'",
+            json.dumps(structured), json.dumps({'body': json.dumps(structured)}),
+            json.dumps({'body': json.dumps({'body': json.dumps(structured)})}))
 
 
 class SecurityBoundaries(unittest.TestCase):
@@ -59,6 +83,71 @@ class SecurityBoundaries(unittest.TestCase):
         rename = 'diff --git a/.env b/app.py\nsimilarity index 50%\nrename from .env\nrename to app.py\nindex 1111111..2222222 100644\n--- a/.env\n+++ b/app.py\n@@ -1 +1 @@\n-old\n+new\n'
         with self.assertRaises(ReviewError):
             locations(rename)
+
+    def test_cookie_and_compound_fields_never_reach_provider(self):
+        for name, value in SENSITIVE_FIELDS:
+            for text in sensitive_text_forms(name, value):
+                for boundary in ('diff', 'metadata'):
+                    data = dict(self.data)
+                    if boundary == 'diff':
+                        data['diff'] = data['diff'].replace('+value = 2', '+' + text)
+                    else:
+                        data['metadata'] = dict(title='Change value', body=text)
+                    client = Mock()
+                    with self.subTest(name=name, boundary=boundary, text=text):
+                        with self.assertRaises(ReviewError):
+                            analyze(data, client=client, repository_path=self.root)
+                        # No token-count, generation, or other provider interaction.
+                        self.assertEqual(client.mock_calls, [])
+
+    def test_cookie_and_compound_fields_are_removed_from_all_diagnostic_sinks(self):
+        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()) as console:
+            summary = self.root / 'step-summary'
+            with patch.dict(os.environ, {'GITHUB_STEP_SUMMARY': str(summary)}):
+                diagnostics = Diagnostics(directory, 'analyze')
+                for name, value in SENSITIVE_FIELDS:
+                    samples = ({name: value}, *sensitive_text_forms(name, value))
+                    for sample in samples:
+                        diagnostics.request('call', sample)
+                        diagnostics.response('call', {'body': sample})
+                        diagnostics.context([{'text': sample}])
+                        diagnostics.event('probe', message=sample)
+                        diagnostics.finalize('failure', note=sample)
+                manifest = diagnostics.finalize('failure')
+            combined = console.getvalue() + summary.read_text() + ''.join(
+                path.read_text() for path in Path(directory).iterdir())
+            for name, value in SENSITIVE_FIELDS:
+                with self.subTest(name=name):
+                    self.assertNotIn(value, combined)
+            # Later cookies must not survive a partial first-token replacement.
+            for fragment in ('cookie-first-canary', 'cookie-last-canary', 'set-cookie-canary',
+                             'mixed-cookie-canary', 'mixed-last-canary',
+                             'quoted-first-canary', 'quoted-last-canary', 'custom-auth-canary'):
+                self.assertNotIn(fragment, combined)
+            self.assertTrue(manifest['redacted'])
+            self.assertFalse(manifest['complete'])
+
+    def test_ordinary_credential_related_code_remains_admissible(self):
+        for text in ('password_length = 12', 'db_password_length = 12',
+                     'client_secret_name = "CLIENT_SECRET"', 'cookie_count = 2',
+                     'secretary = "ordinary"'):
+            with self.subTest(text=text):
+                self.assertFalse(sensitive(text))
+                self.assertEqual(sanitize(text), text)
+                data = {**self.data, 'diff': self.data['diff'].replace('+value = 2', '+' + text)}
+                validate_input(data)
+
+    def test_sensitive_fields_are_denied_in_context_and_search(self):
+        for index, (name, value) in enumerate(SENSITIVE_FIELDS):
+            (self.root / f'settings-{index}.txt').write_text(f'{name}: {value}\n')
+        self.git('add', '.'); self.git('commit', '-m', 'Sensitive field fixtures')
+        data = {**self.data, 'head': self.git('rev-parse', 'HEAD')}
+        for index, (name, value) in enumerate(SENSITIVE_FIELDS):
+            with self.subTest(name=name):
+                reader = ContextReader(self.root, data)
+                self.assertFalse(reader.execute('read_file', {'path': f'settings-{index}.txt'})['ok'])
+                self.assertFalse(reader.execute('search_text', {'query': f'{name}: {value}'})['ok'])
+                self.assertNotIn(value, str(reader.sources) + str(reader.limitations))
 
     def test_all_runtime_credentials_and_serialized_patterns_are_redacted(self):
         samples = ['{"password": "quoted-canary-value"}', 'postgresql://user:url-canary-value@host/db', json.dumps({'body': json.dumps({'password': 'quoted-canary-value'})})]

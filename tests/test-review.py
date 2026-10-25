@@ -16,7 +16,7 @@ from pr_review.core import ReviewError, cached_result, digest, gate, payload, va
 from pr_review.context import ContextReader
 from pr_review.diagnostics import Diagnostics
 from pr_review.service import prepare, analyze, publish
-from pr_review.review import policies, source_metadata, verify_sources
+from pr_review.review import policies, schema, source_metadata, system_prompt, verify_sources
 
 
 class Github:
@@ -340,6 +340,76 @@ class Review(unittest.TestCase):
         client,calls=self.mock_client();data={**self.data,'metadata':dict(title='x'*30000,body='')}
         with self.assertRaises(ReviewError):analyze(data,client=client,repository_path=self.root)
         self.assertEqual(calls,[])
+
+    def test_final_context_fits_complete_request_and_reports_source_omission(self):
+        # Repeated quotes, backslashes and Unicode expose nested JSON overhead.
+        (self.root / 'README.md').write_text('Example: "quoted" \\ path é\n' * 160)
+        (self.root / 'contract.py').write_text('FIELD = "name"\n')
+        self.git('add', '.'); self.git('commit', '-m', 'Base with escaped context')
+        base = self.git('rev-parse', 'HEAD')
+        (self.root / 'contract.py').write_text('FIELD = "label"\n')
+        self.git('commit', '-am', 'Rename field')
+        github = Github(base, self.git('rev-parse', 'HEAD'))
+        limit = 11500
+        with patch.dict(os.environ, {'CLAUDE_MAX_EXPLORATION_CALLS': '0',
+                                    'CLAUDE_MAX_INPUT_TOKENS': str(limit)}):
+            data = prepare(github, 'fixture/repo', 1, self.root, mode='context')
+            reader = ContextReader(self.root, data)
+            sources = reader.initial_context()
+            initial = dict(diff=data['diff'], metadata=data['metadata'], sources=sources,
+                           limitations=['Exploration disabled by configuration.'])
+            request = dict(model=data['model'], system=system_prompt(),
+                           messages=[dict(role='user', content=json.dumps(initial))],
+                           max_tokens=4000, output_config={'effort': 'low',
+                               'format': {'type': 'json_schema', 'schema': schema()}})
+            old_estimate = (len(json.dumps(initial).encode()) + len(system_prompt().encode())
+                            + len(json.dumps(schema()).encode()) + 2048)
+            self.assertLessEqual(old_estimate, limit)
+            self.assertGreater(len(json.dumps(request, ensure_ascii=False).encode()) + 1024, limit)
+            omitted = next(s for s in sources if s['path'] == 'README.md')
+            client, calls = self.mock_client()
+            client.messages.count_tokens = unittest.mock.Mock(return_value=NS(input_tokens=100))
+            result = analyze(data, client=client, repository_path=self.root)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(client.messages.count_tokens.call_count, 1)
+            self.assertLessEqual(len(json.dumps(calls[0], ensure_ascii=False).encode()) + 1024, limit)
+            final = json.loads(calls[0]['messages'][0]['content'])
+            self.assertEqual([s['path'] for s in final['sources']], ['contract.py'])
+            self.assertNotIn(omitted['source_id'], calls[0]['messages'][0]['content'])
+            self.assertNotIn(omitted['text'], calls[0]['messages'][0]['content'])
+            limitation = 'Final context input budget reached; some sources omitted.'
+            self.assertEqual(final['limitations'].count(limitation), 1)
+            self.assertIn(limitation, result['content']['limitations'])
+            self.assertEqual(result['coverage'], 'partial')
+
+    def test_final_request_exact_limit_retains_context_and_one_over_trims(self):
+        with patch.dict(os.environ, {'CLAUDE_MAX_EXPLORATION_CALLS': '0'}):
+            data = {**self.data, 'policies': policies(self.data['model'])}
+            client, calls = self.mock_client()
+            analyze(data, client=client, repository_path=self.root)
+            exact = len(json.dumps(calls[0], ensure_ascii=False).encode()) + 1024
+            self.assertGreater(exact - 1, 4096)
+            for limit in (exact, exact - 1):
+                with self.subTest(limit=limit), patch.dict(os.environ, {'CLAUDE_MAX_INPUT_TOKENS': str(limit)}):
+                    data = {**self.data, 'policies': policies(self.data['model'])}
+                    client, calls = self.mock_client()
+                    result = analyze(data, client=client, repository_path=self.root)
+                    final = json.loads(calls[0]['messages'][0]['content'])
+                    self.assertEqual(bool(final['sources']), limit == exact)
+                    self.assertLessEqual(len(json.dumps(calls[0], ensure_ascii=False).encode()) + 1024, limit)
+                    omission = 'Final context input budget reached; some sources omitted.'
+                    self.assertEqual(omission in result['content']['limitations'], limit != exact)
+
+    def test_irreducible_final_input_fails_before_count_or_generation(self):
+        with patch.dict(os.environ, {'CLAUDE_MAX_EXPLORATION_CALLS': '0'}):
+            data = {**self.data, 'metadata': dict(title='x' * 30000, body=''),
+                    'policies': policies(self.data['model'])}
+            client, calls = self.mock_client()
+            client.messages.count_tokens = unittest.mock.Mock(return_value=NS(input_tokens=100))
+            with self.assertRaisesRegex(ReviewError, 'budget.input: conservative'):
+                analyze(data, client=client, repository_path=self.root)
+            client.messages.count_tokens.assert_not_called()
+            self.assertEqual(calls, [])
     def test_deadline_reserves_final_call(self):
         client,calls=self.mock_client()
         with patch('pr_review.review.time',NS(monotonic=unittest.mock.Mock(side_effect=[0,241]))):
@@ -427,6 +497,52 @@ class Review(unittest.TestCase):
                         self.assertTrue(any(s['snapshot'] == snapshot and s['start_line'] <= 502 <= s['end_line'] for s in retained))
                 else:
                     self.assertIn('tool operation limit reached', result['content']['limitations'])
+
+    def test_diff_mode_reads_one_large_hunk_across_chunks_and_marks_budget_omissions(self):
+        path = self.root / 'large-hunk.py'
+        before = [f'value_{n} = {n}\n' for n in range(1, 451)]
+        after = [f'value_{n} = -{n}\n' for n in range(1, 451)]
+        path.write_text(''.join(before))
+        self.git('add', '.'); self.git('commit', '-m', 'large hunk base fixture')
+        self.github.base = self.git('rev-parse', 'HEAD')
+        path.write_text(''.join(after))
+        self.git('commit', '-am', 'one contiguous large hunk')
+        self.github.head = self.git('rev-parse', 'HEAD')
+        for limit, expected in [('6', 'complete'), ('5', 'partial')]:
+            with self.subTest(limit=limit), patch.dict(os.environ, {'CLAUDE_MAX_TOOL_OPERATIONS': limit}):
+                data = prepare(self.github, 'fixture/repo', 1, self.root, mode='diff')
+                self.assertEqual(data['changed_files'], ['large-hunk.py'])
+                self.assertEqual(data['diff'].count('\n@@ '), 1)
+                self.assertIn('@@ -1,450 +1,450 @@', data['diff'])
+                retained = []
+                original_source = ContextReader._source
+                def capture(reader, *args):
+                    source = original_source(reader, *args)
+                    retained.append(source)
+                    return source
+                with patch.object(ContextReader, '_source', capture):
+                    result = analyze(data, recorded=copy.deepcopy(self.clean), repository_path=self.root)
+                self.assertEqual(result['coverage'], expected)
+                self.assertEqual(result['content']['status'], expected)
+                covered = {'before': set(), 'after': set()}
+                for source in retained:
+                    self.assertEqual(source['path'], 'large-hunk.py')
+                    start, end = source['start_line'], source['end_line']
+                    self.assertLessEqual(end - start + 1, 200)
+                    lines = before if source['snapshot'] == 'before' else after
+                    self.assertEqual(source['text'], ''.join(lines[start - 1:end]))
+                    covered[source['snapshot']].update(range(start, end + 1))
+                if expected == 'complete':
+                    self.assertEqual(result['content']['limitations'], [])
+                    for snapshot in ('before', 'after'):
+                        # Exact coverage includes both sides of 200/201 and
+                        # 400/401, as well as the final changed line (450).
+                        self.assertEqual(covered[snapshot], set(range(1, 451)))
+                else:
+                    self.assertIn('tool operation limit reached', result['content']['limitations'])
+                    self.assertGreater(sum(map(len, covered.values())), 0)
+                    self.assertLess(sum(map(len, covered.values())), 900)
+                    self.assertTrue(any(450 not in lines for lines in covered.values()))
 
     def test_diff_mode_renamed_file_reads_original_before_path(self):
         self.github.base = self.github.head
